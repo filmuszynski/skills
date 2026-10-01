@@ -149,6 +149,9 @@ __JS__
 """
 
 
+_PLACEHOLDER = re.compile(r"__(CREDIT|CSS|DATA|JS|BODY|ACTIONS|GENERAL|PILL|KIND|SHORT|TITLE)__")
+
+
 def _asset(name):
     with io.open(os.path.join(ASSETS, name), encoding="utf-8") as fh:
         return fh.read()
@@ -312,26 +315,29 @@ def render(title, body_html, sections, prompt_spec, meta,
         "select": select or "one",
     }
 
-    out = PAGE
-    out = out.replace("__CREDIT__", _credit_html(meta.get("version")))
-    out = out.replace("__CSS__", _asset("shell.css"))
-    out = out.replace("__DATA__", _json_literal(data))
     js = _asset("shell.js")
     # Each in its own block, so an error in one cannot stop the next.
     for name in scripts or ():
         js += "\n</script>\n<script>\n" + _asset(name)
-    out = out.replace("__JS__", js)
-    out = out.replace("__BODY__", body_html)
-    out = out.replace("__ACTIONS__", _actions_html(actions))
-    out = out.replace("__GENERAL__", _esc(general_placeholder or "A note on the whole plan, optional"))
     kind = meta.get("kind", "document")
-    out = out.replace("__PILL__", _esc(PILL_KIND.get(kind, "")))
-    out = out.replace("__KIND__", _esc(EYEBROW_LABEL.get(kind, kind)))
-    # Not cut to length: the header shortens it with an ellipsis while the
-    # counters show, and widens to the whole name when they slide away.
-    out = out.replace("__SHORT__", _esc(short_title(title, cap=400)))
-    out = out.replace("__TITLE__", _esc(title))
-    return out
+    values = {
+        "CREDIT": _credit_html(meta.get("version")),
+        "CSS": _asset("shell.css"),
+        "DATA": _json_literal(data),
+        "JS": js,
+        "BODY": body_html,
+        "ACTIONS": _actions_html(actions),
+        "GENERAL": _esc(general_placeholder or "A note on the whole plan, optional"),
+        "PILL": _esc(PILL_KIND.get(kind, "")),
+        "KIND": _esc(EYEBROW_LABEL.get(kind, kind)),
+        # Not cut to length: the header shortens it with an ellipsis while the
+        # counters show, and widens to the whole name when they slide away.
+        "SHORT": _esc(short_title(title, cap=400)),
+        "TITLE": _esc(title),
+    }
+    # One pass over the template, so inserted text (a page's own <title>, say) is
+    # never scanned again for placeholders.
+    return _PLACEHOLDER.sub(lambda m: values[m.group(1)], PAGE)
 
 
 def write(path, html):

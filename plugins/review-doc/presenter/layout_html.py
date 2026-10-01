@@ -21,7 +21,7 @@ _TITLE_RE = re.compile(r"<title\b[^>]*>(.*?)</title\s*>", re.I | re.S)
 
 
 def _page_words(text):
-    return text.replace("documents", "pages").replace("document", "page")
+    return re.sub(r"\bdocument\b", "page", re.sub(r"\bdocuments\b", "pages", text))
 
 
 # The document page's two verdicts, word for word, with "document" read as "page".

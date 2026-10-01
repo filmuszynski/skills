@@ -91,3 +91,51 @@ def test_frame_src_is_the_slug_origin_on_port_plus_100():
         "http://x-site-1a2b3c.localhost:7877/my%20page.html"
     assert _frame_src(meta, {"protocol": "file:", "port": ""}) == ""
     assert _frame_src({"slug": "s", "target": {"type": "proxy"}}, {"protocol": "http:", "port": "7777"}) == ""
+
+
+@test
+def test_a_hostile_title_is_not_rescanned_for_placeholders():
+    h = new_home()
+    raw = '<title>__ACTIONS__ __BODY__ __JS__ <b>"x"</b></title>'
+    built = layout_html.build(raw, source="/x/t.html", slug="x-t-1a2b3c")
+    html = shell.render(**built)
+    meta = pages.read_meta(shell.write(os.path.join(h, "pages", "x-t-1a2b3c.html"), html))
+    assert meta["kind"] == "html" and meta["slug"] == "x-t-1a2b3c"
+    assert 'title="__ACTIONS__ __BODY__ __JS__ &lt;b&gt;&quot;x&quot;&lt;/b&gt;"' in html
+    assert html.count('<button class="chip verdict ') == len(layout_html.ACTIONS)
+    assert html.count("/* Presenter shell behaviour.") == 1
+
+
+@test
+def test_page_words_respect_word_boundaries():
+    assert layout_html._page_words("the document and documents; documentation") == \
+        "the page and pages; documentation"
+
+
+@test
+def test_doc_page_render_is_unchanged_by_the_single_pass():
+    built = layout_doc.build("# T\n\n## A\n\nx\n", source="/x/n.md", slug="n")
+    new = shell.render(**built)
+    # The old way: one chained replace per placeholder.
+    meta = built["meta"]
+    kind = meta.get("kind", "document")
+    old = shell.PAGE
+    old = old.replace("__CREDIT__", shell._credit_html(meta.get("version")))
+    old = old.replace("__CSS__", shell._asset("shell.css"))
+    data = {"sections": list(built["sections"]),
+            "prompt": {"header": built["prompt_spec"].get("header", "Feedback:"),
+                       "footer": built["prompt_spec"].get("footer", ""),
+                       "generalLabel": built["prompt_spec"].get("generalLabel", "Whole plan")},
+            "meta": dict(meta),
+            "actions": built["actions"] if built.get("actions") is not None else shell.PLAN_ACTIONS,
+            "select": built.get("select") or "one"}
+    old = old.replace("__DATA__", shell._json_literal(data))
+    old = old.replace("__JS__", shell._asset("shell.js"))
+    old = old.replace("__BODY__", built["body_html"])
+    old = old.replace("__ACTIONS__", shell._actions_html(data["actions"]))
+    old = old.replace("__GENERAL__", shell._esc(built.get("general_placeholder") or "A note on the whole plan, optional"))
+    old = old.replace("__PILL__", shell._esc(shell.PILL_KIND.get(kind, "")))
+    old = old.replace("__KIND__", shell._esc(shell.EYEBROW_LABEL.get(kind, kind)))
+    old = old.replace("__SHORT__", shell._esc(shell.short_title(built["title"], cap=400)))
+    old = old.replace("__TITLE__", shell._esc(built["title"]))
+    assert new == old
