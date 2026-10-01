@@ -2030,6 +2030,57 @@ def test_earlier_edits_claim_per_round_and_never_break_painting():
     assert "mark.has-comment mark.prev-comment" in c and "mark.edited mark.prev-edit" in c
 
 
+@test
+def test_earlier_marks_are_a_tint_without_underline():
+    c = shell._asset("shell.css")
+    rule = c[c.index("mark.prev-comment, mark.prev-edit {"):]
+    rule = rule[:rule.index("}")]
+    assert "border-bottom" not in rule, rule
+    assert "background: rgba(217, 166, 46," in rule, "earlier comments rest on a light yellow tint"
+    pe = c[c.index("\nmark.prev-edit {"):]
+    pe = pe[:pe.index("}")]
+    assert "background: rgba(240, 132, 78," in pe and "border" not in pe, pe
+
+
+@test
+def test_current_scope_icon_is_an_open_ring():
+    html = shell.render(**__import__("layout_doc").build("# T\n\n## A\n\nx\n", source="/x/t.md"))
+    assert '<svg class="ico sc-current" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4"/></svg>' in html
+    assert ".sc-current circle { fill" not in shell._asset("shell.css")
+
+
+ROBOT_SEQ = 'function seq(xs) { var i = 0; return function () { return xs[i++ % xs.length]; }; }'
+
+
+@test
+def test_robot_order_never_opens_on_the_last_sketch():
+    names = ["typing", "juggle", "fetch", "idea"]
+    for seed in ([0, 0, 0], [.99, .99, .99], [.5, .1, .7], [.2, .9, .4]):
+        for last in names:
+            out = run_js(["robotOrder"], "robotOrder(%s, %s, seq(%s))" % (json.dumps(names), json.dumps(last), seed),
+                         ROBOT_SEQ)
+            assert sorted(out) == sorted(names), out
+            assert out[0] != last, (seed, last, out)
+    assert run_js(["robotOrder"], 'robotOrder(["solo"], "solo", Math.random)') == ["solo"]
+
+
+@test
+def test_robot_has_many_sketches_and_stops_with_the_box():
+    src = shell._asset("shell.js")
+    scenes = src[src.index("var ROBOT_SCENES = {"):src.index("function robotEnter")]
+    found = re.findall(r"^    (\w+): function \(r\)", scenes, re.M)
+    assert len(found) >= 8, found
+    of = fn_body_run(src, "openFinish")
+    assert 'if (kind === "changes") startRobot(); else stopRobot();' in of
+    assert "stopRobot();" in fn_body_run(src, "closeFinish")
+    sr = fn_body_run(src, "startRobot")
+    assert "reduceMotion" in sr and "ROBOT_LAST" in sr, "still under reduced motion; never the same opener twice"
+    assert "localStorage.getItem(ROBOT_LAST)" in sr and "try {" in sr
+    st = fn_body_run(src, "stopRobot")
+    assert "a.cancel()" in st and "clearTimeout" in st
+    assert "robotBlink" not in fn_body_run(src, "robotNext"), "one blink loop per open, not one per sketch"
+
+
 SCOPE_PRELUDE = 'var SCOPES = ["current", "previous", "all"];'
 
 
@@ -2044,7 +2095,7 @@ def test_scope_steps_current_previous_all():
 def test_scope_button_markup_and_behaviour():
     html = shell.render(**__import__("layout_doc").build("# T\n\n## A\n\nx\n", source="/x/t.md"))
     head = html[html.index("<header>"):html.index("</header>")]
-    assert head.index('id="cycle-scope"') < head.index('class="counters"')
+    assert head.index('class="counters"') < head.index('id="cycle-scope"') < head.index('class="modes"'),         "the scope button sits to the right of the counters"
     assert "hidden" in head[head.index('id="cycle-scope"') - 120:head.index('id="cycle-scope"') + 200]
     src = shell._asset("shell.js")
     for tip in ("Stepping through this round", "Stepping through earlier rounds", "Stepping through every round"):
@@ -2067,7 +2118,7 @@ def test_scope_button_slides_in_from_nothing():
     kf = kf[:kf.index("\n}\n") + 3]
     frm = kf[kf.index("from"):kf.index(" to ")]
     assert "opacity: 0" in frm and "width: 0" in frm, kf
-    assert "margin-right: calc(-1 * var(--ctl-gap, 14px))" in frm, "the gap closes too, so the counters slide"
+    assert "margin-left: calc(-1 * var(--ctl-gap, 14px))" in frm, "the gap closes too, so the switch slides"
     assert "--ctl-gap: 8px" in c, "the narrow header has the smaller gap"
     rm = c[c.index("#cycle-scope.is-new { animation: scope-in"):]
     rm = rm[rm.index("@media (prefers-reduced-motion: reduce)"):]

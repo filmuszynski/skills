@@ -6,6 +6,28 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-01
+
+### Changed
+- Comments and rewrites from earlier rounds are a light tint on the text instead of
+  an underline.
+- The round button sits right of the counters, and its "this round" icon is an open ring.
+- While an Approved, Declined or Waiting box is open, the header and footer stay
+  sharp above the blur, and the header shows the whole title.
+- Copy prompt again sits on the left of the box's buttons instead of under them.
+
+### Fixed
+- Resizing the window no longer makes an open Approved, Declined or Waiting box and
+  its blur vanish while the page stays blocked behind them.
+
+### Added
+- The Approved and Declined boxes draw a check or a cross as they open.
+- The Waiting box has a small stage where a pixel robot plays sketches until the page
+  reloads: typing, juggling, fetching the new version, a bright idea, fishing for bugs,
+  dancing, a coffee break and sweeping up typos. It walks on a different way each time,
+  never opens on the sketch it opened on last time, and rolls new details on every run.
+  With reduced motion it stands still.
+
 ## [1.1.0] - 2026-10-01
 
 ### Added

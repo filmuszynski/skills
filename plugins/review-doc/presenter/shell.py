@@ -60,17 +60,17 @@ __CSS__
   <span class="doc-title">__SHORT__</span>
   <div class="spacer"></div>
   <div class="controls-slot"><div class="controls">
-  <button class="iconbtn" id="cycle-scope" type="button" hidden data-scope="current"
-          data-tip="Stepping through this round" aria-label="Stepping through this round, click to change">
-    <svg class="ico sc-current" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/></svg>
-    <svg class="ico sc-previous" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/><circle cx="8" cy="8" r="5.6"/></svg>
-    <svg class="ico sc-all" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.2" cy="8" r="4"/><circle cx="9.8" cy="8" r="4"/></svg>
-  </button>
   <div class="counters" role="group" aria-label="Jump through your feedback">
     <button class="counter" data-kind="comments" type="button" disabled><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10a1.2 1.2 0 0 1 1.2 1.2v5.1a1.2 1.2 0 0 1-1.2 1.2H7.2L4.4 13.4V11H3a1.2 1.2 0 0 1-1.2-1.2V4.7A1.2 1.2 0 0 1 3 3.5z"/></svg><span class="num">0</span></button>
     <button class="counter" data-kind="edits" type="button" disabled><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.6 2.6l2.8 2.8-7.9 7.9H2.7v-2.8z"/><path d="M9.1 4.1l2.8 2.8"/></svg><span class="num">0</span></button>
     <button class="counter" data-kind="all" type="button" disabled><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.6 14.2V2.4"/><path d="M3.6 2.9h8.6l-2 2.9 2 2.9H3.6"/></svg><span class="num">0</span></button>
   </div>
+  <button class="iconbtn" id="cycle-scope" type="button" hidden data-scope="current"
+          data-tip="Stepping through this round" aria-label="Stepping through this round, click to change">
+    <svg class="ico sc-current" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4"/></svg>
+    <svg class="ico sc-previous" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/><circle cx="8" cy="8" r="5.6"/></svg>
+    <svg class="ico sc-all" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.2" cy="8" r="4"/><circle cx="9.8" cy="8" r="4"/></svg>
+  </button>
   <div class="modes" role="group" aria-label="Review mode">
     <button type="button" data-mode="comment" data-label="Comment" aria-pressed="true"
             data-tip="Select any passage to comment on it">Comment</button>
@@ -117,15 +117,21 @@ __ACTIONS__
   <div class="finish-backdrop"></div>
   <div class="finish-box" role="dialog" aria-modal="true" aria-labelledby="finish-title"
        aria-describedby="finish-text">
-    <h2 id="finish-title"><span class="finish-dot" aria-hidden="true"></span><span class="finish-title-text"></span></h2>
+    <div class="finish-icons" aria-hidden="true">
+      <svg class="finish-ico fi-approve" viewBox="0 0 40 40"><circle class="fi-ring" cx="20" cy="20" r="17" pathLength="1"/><path class="fi-mark" d="M12.5 20.5l5 5 10-11" pathLength="1"/></svg>
+      <svg class="finish-ico fi-decline" viewBox="0 0 40 40"><circle class="fi-ring" cx="20" cy="20" r="17" pathLength="1"/><path class="fi-mark" d="M14 14l12 12" pathLength="1"/><path class="fi-mark fi-mark2" d="M26 14l-12 12" pathLength="1"/></svg>
+      <div class="finish-ico fi-changes robot-stage"></div>
+    </div>
+    <p class="robot-caption" aria-hidden="true"></p>
+    <h2 id="finish-title"><span class="finish-title-text"></span></h2>
     <p id="finish-text"></p>
     <div class="finish-actions">
+      <button type="button" class="finish-recopy" id="finish-recopy"
+              data-tip="Copy the same prompt to the clipboard again">Copy prompt again</button>
       <button type="button" class="btn" id="finish-cancel" data-tip="Go back to edit">Cancel</button>
       <button type="button" class="btn primary" id="finish-close" data-tip="Close this page"
               data-label="Confirm"><span class="lbl">Close page</span></button>
     </div>
-    <button type="button" class="finish-recopy" id="finish-recopy"
-            data-tip="Copy the same prompt to the clipboard again">Copy prompt again</button>
   </div>
 </div>
 <script>

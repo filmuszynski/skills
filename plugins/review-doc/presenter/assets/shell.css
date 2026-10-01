@@ -169,10 +169,11 @@ header > .doc-title { flex-shrink: 1; }
 
 /* The counters are also the navigation, so they have to read as buttons. */
 .counters { display: flex; gap: 5px; }
-/* The scope toggle: three icons in one box, only the current one opaque, so a
-   click cross-fades instead of swapping. It fades in the first time a page has
-   an earlier round, growing from no width and taking back the row gap behind
-   it as it goes, so the counters slide over instead of jumping. */
+/* The scope toggle, right of the counters: three icons in one box, only the
+   current one opaque, so a click cross-fades instead of swapping. It fades in
+   the first time a page has an earlier round, growing from no width and taking
+   back the row gap in front of it as it goes, so the mode switch slides over
+   instead of jumping. */
 .controls { --ctl-gap: 14px; }
 #cycle-scope { position: relative; width: 30px; padding: 0; display: inline-grid; place-items: center; }
 #cycle-scope.is-new { animation: scope-in .2s ease; overflow: hidden; }
@@ -182,10 +183,9 @@ header > .doc-title { flex-shrink: 1; }
 #cycle-scope[data-scope="current"] .sc-current,
 #cycle-scope[data-scope="previous"] .sc-previous,
 #cycle-scope[data-scope="all"] .sc-all { opacity: 1; }
-#cycle-scope .sc-current circle { fill: currentColor; }
 @keyframes scope-in {
-  from { opacity: 0; width: 0; margin-right: calc(-1 * var(--ctl-gap, 14px)); }
-  to { opacity: 1; width: 30px; margin-right: 0; }
+  from { opacity: 0; width: 0; margin-left: calc(-1 * var(--ctl-gap, 14px)); }
+  to { opacity: 1; width: 30px; margin-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   #cycle-scope.is-new { animation: none; }
@@ -910,20 +910,19 @@ mark.edited-cut::after {
   vertical-align: super;
 }
 
-/* Earlier rounds: the underline of their kind, no fill, so the current round
-   stays the loud one. A light tint on hover, half the current marks' resting
-   fill, says they open. */
+/* Earlier rounds: a light tint of their kind on the text, no underline, about
+   half the current marks' resting fill, so the current round stays the loud
+   one. Hover deepens it to say they open. */
 mark.prev-comment, mark.prev-edit {
-  background: transparent;
+  background: rgba(217, 166, 46, .11);
   color: inherit;
   padding: 0;
   cursor: pointer;
-  border-bottom: 2px solid var(--mark);
   transition: background-color .15s ease;
 }
-mark.prev-edit { border-bottom-color: var(--accent); }
-mark.prev-comment:hover, mark.prev-comment.is-open { background: rgba(217, 166, 46, .11); }
-mark.prev-edit:hover, mark.prev-edit.is-open { background: rgba(240, 132, 78, .13); }
+mark.prev-edit { background: rgba(240, 132, 78, .13); }
+mark.prev-comment:hover, mark.prev-comment.is-open { background: rgba(217, 166, 46, .2); }
+mark.prev-edit:hover, mark.prev-edit.is-open { background: rgba(240, 132, 78, .24); }
 /* Nested inside a current mark on the same words, the current fill wins and
    the earlier one only adds its underline. A current comment added later
    lands INSIDE an earlier mark instead; it keeps its own fill either way. */
@@ -1426,10 +1425,11 @@ body.prompt-hidden .verdict-row { margin-top: 0; }
 .finish.is-open .finish-box { opacity: 1; transform: none; }
 .finish-box h2 { margin: 0 0 8px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
 .finish-box p { margin: 0 0 18px; color: var(--ink); line-height: 1.5; }
-.finish-actions { display: flex; justify-content: flex-end; gap: 10px; }
+/* Copy prompt again opens the row on the left; the auto margin pushes the two
+   buttons to the right edge. */
+.finish-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .finish-recopy {
-  display: block;
-  margin: 12px 0 0 auto;
+  margin-right: auto;
   padding: 0;
   border: 0;
   background: none;
@@ -1444,9 +1444,62 @@ body.prompt-hidden .verdict-row { margin-top: 0; }
 }
 .finish-recopy:hover { color: var(--link); }
 .finish-recopy.is-done { color: var(--ok); text-decoration: none; }
-.finish-dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.finish.is-wait .finish-dot { display: inline-block; animation: finish-pulse 1.6s ease-in-out infinite; }
-@keyframes finish-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+/* Header and footer stay sharp above the blur, so the page still says what it
+   is and what was chosen, but they take no clicks while a box is open. */
+body.finishing header, body.finishing footer { position: relative; z-index: 9001; pointer-events: none; }
+
+/* One icon per box, chosen by data-kind. Approve and decline draw themselves
+   once: the ring, then the mark (pathLength 1, so one dash is the whole line).
+   They restart on every open because the overlay leaves display:none. Waiting
+   is a small pixel robot that bobs and blinks until the page reloads. */
+.finish-icons { display: flex; height: 40px; margin-bottom: 10px; }
+.finish-ico { display: none; width: 40px; height: 40px; fill: none; stroke-width: 2.4;
+              stroke-linecap: round; stroke-linejoin: round; overflow: visible; }
+.finish[data-kind="approve"] .fi-approve,
+.finish[data-kind="decline"] .fi-decline,
+.finish[data-kind="changes"] .fi-changes { display: block; }
+.fi-approve { stroke: var(--ok); }
+.fi-decline { stroke: var(--skip); }
+.fi-ring, .fi-mark { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.finish.is-open .fi-ring { animation: finish-draw .4s ease-out forwards; }
+.finish.is-open .fi-mark { animation: finish-draw .26s ease-out .34s forwards; }
+.finish.is-open .fi-mark2 { animation-delay: .52s; }
+@keyframes finish-draw { to { stroke-dashoffset: 0; } }
+/* The waiting stage: a strip as wide as the box where the robot plays its
+   sketches (shell.js, "waiting robot"). The caption under it says what the
+   robot is up to and fades between lines. */
+.finish[data-kind="changes"] .finish-icons { height: auto; margin-bottom: 4px; }
+.robot-stage { width: 100%; height: 92px; border-radius: 8px; background: var(--bg); overflow: hidden; }
+.finish[data-kind="changes"] .robot-stage { display: block; }
+.rb-svg { display: block; width: 100%; height: 100%; }
+.finish-box .robot-caption { display: none; margin: 0 0 10px; min-height: 1.4em; font-size: 12px; color: var(--label);
+                 text-align: center; opacity: 0; transition: opacity .16s ease; }
+.finish[data-kind="changes"] .finish-box .robot-caption { display: block; }
+.finish-box .robot-caption.is-on { opacity: 1; }
+.rb-ground { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.rb-body { fill: var(--accent); }
+.rb-eye, .rb-dark { fill: #2a1608; }
+.rb-lid { fill: #4a443d; }
+.rb-logo { fill: var(--accent); }
+.rb-paper { fill: #fff; stroke: var(--line); stroke-width: .8; }
+.rb-paper.fresh { stroke: var(--ok); }
+.rb-ink { fill: var(--label); }
+.rb-tick, .rb-handle { fill: none; stroke: var(--ok); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.rb-handle { stroke: var(--line); stroke-width: 1.2; }
+.rb-steam { fill: none; stroke: var(--label); stroke-width: .9; stroke-linecap: round; }
+.rb-glyph { font: 600 8px var(--mono); fill: var(--accent-ink); }
+.rb-big { font: 700 16px var(--sans); fill: var(--accent-ink); }
+.rb-note { font: 13px var(--sans); fill: #8a5cc2; }
+.rb-typo { font: 600 7px var(--mono); fill: var(--skip); text-decoration: underline wavy; }
+.rb-cloud { fill: #fff; stroke: var(--line); stroke-width: .8; }
+.rb-bulb { fill: var(--mark); stroke: #b8891d; stroke-width: 1; }
+.rb-ray { stroke: var(--mark); stroke-width: 1.6; stroke-linecap: round; }
+.rb-rod { stroke: #6b4a2b; stroke-width: 1.6; stroke-linecap: round; }
+.rb-water { fill: none; stroke: #3b6fb6; stroke-width: 1.4; }
+.rb-bob { fill: var(--skip); stroke: #fff; stroke-width: .8; }
+.rb-bug { fill: var(--ok); }
+.rb-broom { fill: #c9a24a; }
+.rb-zap { fill: none; stroke: var(--mark); stroke-width: 1.4; stroke-linejoin: round; }
 #finish-close { display: inline-grid; transition: background-color .18s ease, border-color .18s ease, color .18s ease; }
 #finish-close[hidden] { display: none; }
 /* The longer label is laid out invisibly, so arming does not resize the button. */
@@ -1456,7 +1509,9 @@ body.prompt-hidden .verdict-row { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   .finish-backdrop, .finish-box, #finish-close, .finish-recopy { transition: none; }
   .finish-box { transform: none; }
-  .finish.is-wait .finish-dot { animation: none; }
+  .finish.is-open .fi-ring, .finish.is-open .fi-mark { animation: none; }
+  .robot-caption { transition: none; }
+  .fi-ring, .fi-mark { stroke-dashoffset: 0; }
 }
 
 @media print {

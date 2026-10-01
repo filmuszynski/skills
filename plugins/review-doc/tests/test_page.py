@@ -284,10 +284,14 @@ def test_close_page_arms_like_reset():
 
 
 @test
-def test_copy_prompt_again_sits_under_the_buttons():
+def test_copy_prompt_again_sits_left_of_the_buttons():
     html = page()
     box = html[html.index('id="finish"'):]
-    assert box.index('class="finish-actions"') < box.index('id="finish-recopy"')
+    assert box.index('class="finish-actions"') < box.index('id="finish-recopy"') < box.index('id="finish-cancel"'), \
+        "the link opens the button row, left of Cancel"
+    rule = css()[css().index(".finish-recopy {"):]
+    rule = rule[:rule.index("}")]
+    assert "margin-right: auto" in rule and "display: block" not in rule, rule
     assert 'data-tip="Copy the same prompt to the clipboard again"' in box
     assert ">Copy prompt again<" in box
     rc = fn_body(js(), "onFinishRecopy")
@@ -315,3 +319,49 @@ def test_hidden_close_button_really_hides():
     body = fn_body(js(), "openFinish")
     assert ("if (!finishKind) finishFrom = doc.querySelector('.verdict[data-verdict=\"' + kind + '\"]')"
             " || doc.activeElement;") in body, "Cancel returns focus to the verdict button"
+
+
+@test
+def test_finish_boxes_draw_their_own_icon():
+    html = page()
+    box = html[html.index('id="finish"'):]
+    for k in ("approve", "decline"):
+        assert 'class="finish-ico fi-%s"' % k in box, k
+    assert 'class="finish-ico fi-changes robot-stage"' in box
+    assert box.index('class="robot-caption"') < box.index('id="finish-title"')
+    assert "finish-dot" not in box and "finish-dot" not in css()
+    c = css()
+    assert "@keyframes finish-draw" in c and "stroke-dashoffset" in c
+    for k in ("approve", "decline", "changes"):
+        assert '.finish[data-kind="%s"] .fi-%s' % (k, k) in c, k
+    rm = c[c.index("/* ---- finish overlay"):]
+    rm = rm[rm.index("@media (prefers-reduced-motion: reduce)"):]
+    rm = rm[:rm.index("\n}\n")]
+    assert "animation: none" in rm and "stroke-dashoffset: 0" in rm, rm
+    of = fn_body(js(), "openFinish")
+    assert 'root.setAttribute("data-kind", kind)' in of
+
+
+@test
+def test_header_and_footer_stay_sharp_above_the_finish_box():
+    c = css()
+    assert "body.finishing header, body.finishing footer" in c
+    rule = c[c.index("body.finishing header, body.finishing footer"):]
+    rule = rule[:rule.index("}")]
+    assert "z-index: 9001" in rule and "pointer-events: none" in rule and "position: relative" in rule, rule
+    src = js()
+    of = fn_body(src, "openFinish")
+    assert 'body.classList.add("finishing")' in of and 'classList.add("title-peek")' in of
+    cf = fn_body(src, "closeFinish")
+    assert 'body.classList.remove("finishing")' in cf and 'classList.remove("title-peek")' in cf
+    wp = fn_body(src, "wirePeek")
+    assert "if (finishOpen()) return;" in wp, "leaving the title never drops the peek a box set"
+
+
+@test
+def test_closing_a_bubble_leaves_the_finish_box_open():
+    # closeBubble runs on every window resize. It used to strip is-open from the
+    # finish overlay too, which faded the box and blur out while the page still
+    # treated the box as open.
+    cb = fn_body(js(), "closeBubble")
+    assert 'doc.querySelectorAll(".is-open:not(.finish)")' in cb, cb

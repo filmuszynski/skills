@@ -1914,7 +1914,9 @@
   function closeBubble() {
     if (bubble && bubble.parentNode) bubble.parentNode.removeChild(bubble);
     bubble = null;
-    var open = doc.querySelectorAll(".is-open");
+    /* The finish overlay uses is-open too, and this runs on every resize, so
+       it is left alone: only closeFinish takes it down. */
+    var open = doc.querySelectorAll(".is-open:not(.finish)");
     for (var i = 0; i < open.length; i++) open[i].classList.remove("is-open");
   }
 
@@ -2654,6 +2656,484 @@
     }
   }
 
+  /* ------------------------------------------------------ waiting robot */
+
+  /* While the page waits for Claude, a small pixel robot fills the box with
+     short sketches. Every open starts on a different sketch than the last one
+     (remembered per browser), runs the rest in a shuffled order and rolls new
+     details each time, until the page reloads or the box closes. Everything is
+     the Web Animations API on SVG built here, so stop() can cancel it all. */
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var ROBOT_LAST = "review-doc-robot-last";
+  var ROBOT_PAL = ["#F0844E", "#D9A62E", "#2f7d55", "#3b6fb6", "#9a3b2a", "#8a5cc2"];
+  var ROBOT_TYPOS = ["teh", "recieve", "adn", "wierd", "untill", "seperate", "definately", "occured"];
+  var robot = null;
+
+  function rnd(a, b) { return a + Math.random() * (b - a); }
+  function pick(list) { return list[Math.floor(Math.random() * list.length)]; }
+
+  /* A shuffled run of the sketch names that does not start on `last`. Pure, so
+     the test can drive it with its own random source. */
+  function robotOrder(names, last, random) {
+    var out = names.slice();
+    for (var i = out.length - 1; i > 0; i--) {
+      var j = Math.floor(random() * (i + 1)), t = out[i];
+      out[i] = out[j]; out[j] = t;
+    }
+    if (out.length > 1 && out[0] === last) { var s = out[0]; out[0] = out[1]; out[1] = s; }
+    return out;
+  }
+
+  function svgEl(tag, attrs, parent) {
+    var e = doc.createElementNS(SVGNS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+
+  function rect(parent, x, y, w, h, cls) {
+    return svgEl("rect", { x: x, y: y, width: w, height: h, "class": cls || "" }, parent);
+  }
+
+  function origin(e, o) { e.style.transformBox = "fill-box"; e.style.transformOrigin = o || "50% 50%"; return e; }
+
+  /* The robot: 22 x 16 grid cells drawn at 3px, standing on the ground line
+     in the middle of the stage. The viewBox runs from -50 to 290 so the
+     drawing (0 to 240) sits centred in a strip about four times as wide as
+     it is high, the shape of the box. Groups that move get their own node so
+     no CSS transform ever fights an SVG transform attribute. */
+  function buildRobot(stage) {
+    var svg = svgEl("svg", { viewBox: "-50 0 340 84", "class": "rb-svg", "aria-hidden": "true" });
+    stage.appendChild(svg);
+    svgEl("line", { x1: -50, y1: 78.5, x2: 290, y2: 78.5, "class": "rb-ground" }, svg);
+    var back = svgEl("g", {}, svg);
+    var pos = svgEl("g", {}, svg);
+    var place = svgEl("g", { transform: "translate(87 30) scale(3)" }, pos);
+    var hop = origin(svgEl("g", {}, place), "50% 100%");
+    var legs = [4, 8, 12, 16].map(function (x) { return origin(rect(hop, x, 12, 2, 4, "rb-body"), "50% 0%"); });
+    rect(hop, 3, 2, 16, 10, "rb-body");
+    var armL = origin(rect(hop, 0, 6, 3, 3, "rb-body"), "100% 50%");
+    var armR = origin(rect(hop, 19, 6, 3, 3, "rb-body"), "0% 50%");
+    var look = svgEl("g", {}, hop);
+    var eyes = origin(svgEl("g", {}, look));
+    rect(eyes, 6, 5, 2, 3, "rb-eye");
+    rect(eyes, 14, 5, 2, 3, "rb-eye");
+    var carry = svgEl("g", {}, pos);
+    var fx = svgEl("g", {}, svg);
+    return { svg: svg, back: back, pos: pos, hop: hop, legs: legs, armL: armL, armR: armR,
+             look: look, eyes: eyes, carry: carry, fx: fx };
+  }
+
+  function robotAnim(e, frames, opts) {
+    if (!robot || !e.animate) return null;
+    var a = e.animate(frames, opts);
+    robot.anims.push(a);
+    return a;
+  }
+
+  function robotLater(fn, ms) {
+    if (!robot) return;
+    var r = robot;
+    r.timers.push(setTimeout(function () { if (robot === r) fn(); }, ms));
+  }
+
+  function robotSay(text) {
+    var c = robot && robot.caption;
+    if (!c) return;
+    c.classList.remove("is-on");
+    robotLater(function () { c.textContent = text; c.classList.add("is-on"); }, 160);
+  }
+
+  /* A prop that pops in, and a text glyph, both in stage coordinates. */
+  function popIn(e, delay) {
+    origin(e, "50% 100%");
+    robotAnim(e, [{ transform: "scale(0)", opacity: 0 }, { transform: "scale(1.15)", opacity: 1, offset: .7 },
+                  { transform: "scale(1)", opacity: 1 }],
+              { duration: 320, delay: delay || 0, fill: "both", easing: "ease-out" });
+    return e;
+  }
+
+  function glyph(parent, x, y, text, cls) {
+    var t = svgEl("text", { x: x, y: y, "class": cls || "rb-glyph", "text-anchor": "middle" }, parent);
+    t.textContent = text;
+    return t;
+  }
+
+  function floatAway(e, dx, dy, ms, delay) {
+    origin(e);
+    robotAnim(e, [{ transform: "translate(0,0) rotate(0deg)", opacity: 0 },
+                  { transform: "translate(" + dx * .2 + "px," + dy * .2 + "px) rotate(" + rnd(-20, 20) + "deg)", opacity: 1, offset: .2 },
+                  { transform: "translate(" + dx + "px," + dy + "px) rotate(" + rnd(-40, 40) + "deg)", opacity: 0 }],
+              { duration: ms, delay: delay || 0, fill: "both", easing: "ease-out" });
+  }
+
+  function walkLegs(r, ms, step) {
+    step = step || 170;
+    r.legs.forEach(function (leg, i) {
+      robotAnim(leg, [{ transform: "scaleY(1)" }, { transform: "scaleY(.5)" }, { transform: "scaleY(1)" }],
+                { duration: step * 2, iterations: Math.ceil(ms / (step * 2)), delay: i % 2 ? step : 0 });
+    });
+    robotAnim(r.hop, [{ transform: "translateY(0)" }, { transform: "translateY(-.6px)" }, { transform: "translateY(0)" }],
+              { duration: step, iterations: Math.ceil(ms / step) });
+  }
+
+  function pumpArms(r, ms, beat, lift) {
+    [r.armL, r.armR].forEach(function (arm, i) {
+      robotAnim(arm, [{ transform: "translateY(0)" }, { transform: "translateY(" + -(lift || 2) + "px)" }, { transform: "translateY(0)" }],
+                { duration: beat * 2, iterations: Math.ceil(ms / (beat * 2)), delay: i ? beat : 0 });
+    });
+  }
+
+  function lookAt(r, x, y, ms, delay) {
+    robotAnim(r.look, [{ transform: "translate(0,0)" }, { transform: "translate(" + x + "px," + y + "px)", offset: .12 },
+                       { transform: "translate(" + x + "px," + y + "px)", offset: .88 }, { transform: "translate(0,0)" }],
+              { duration: ms, delay: delay || 0, fill: "both" });
+  }
+
+  function jump(r, height, delay, times) {
+    robotAnim(r.hop, [{ transform: "translateY(0) scale(1,1)" }, { transform: "translateY(0) scale(1.1,.85)", offset: .15 },
+                      { transform: "translateY(" + -height + "px) scale(.92,1.1)", offset: .5 },
+                      { transform: "translateY(0) scale(1.1,.88)", offset: .85 }, { transform: "translateY(0) scale(1,1)" }],
+              { duration: 520, delay: delay || 0, iterations: times || 1, easing: "ease-in-out" });
+  }
+
+  function burst(parent, x, y, n, delay) {
+    for (var i = 0; i < n; i++) {
+      var a = (Math.PI * 2 * i) / n + rnd(-.3, .3), d = rnd(12, 22);
+      var p = svgEl("rect", { x: x - 1.5, y: y - 1.5, width: 3, height: 3, fill: pick(ROBOT_PAL) }, parent);
+      robotAnim(p, [{ transform: "translate(0,0) scale(1)", opacity: 1 },
+                    { transform: "translate(" + Math.cos(a) * d + "px," + Math.sin(a) * d + "px) scale(.3)", opacity: 0 }],
+                { duration: 600, delay: delay || 0, fill: "both", easing: "ease-out" });
+    }
+  }
+
+  /* The sketches. Each one draws its props, sets its animations going and
+     returns how long it runs; the director clears the props afterwards. */
+  var ROBOT_SCENES = {
+    typing: function (r) {
+      robotSay(pick(["Typing up your changes", "Hammering the keyboard", "Writing it all down"]));
+      var lap = popIn(svgEl("g", {}, r.fx));
+      rect(lap, 100, 56, 40, 15, "rb-lid");
+      svgEl("circle", { cx: 120, cy: 63.5, r: 2, "class": "rb-logo" }, lap);
+      rect(lap, 94, 71, 52, 3, "rb-dark");
+      lookAt(r, 0, 1, 4800);
+      pumpArms(r, 4600, 90, 2);
+      var bits = ["{", "}", "</>", ";", "=", "#", "()", "[]", "*", "+", "fn", "ok"];
+      var n = 9 + Math.floor(rnd(0, 6));
+      for (var i = 0; i < n; i++) {
+        floatAway(glyph(r.fx, rnd(104, 136), 56, pick(bits)), rnd(-26, 26), rnd(-40, -54), rnd(900, 1400), 300 + i * rnd(280, 400));
+      }
+      robotLater(function () { robotSay("Saved"); jump(r, 5, 0, 1); burst(r.fx, 120, 26, 10); }, 4700);
+      return 5600;
+    },
+
+    juggle: function (r) {
+      robotSay(pick(["Juggling your comments", "Keeping every note in the air", "Three notes, two hands"]));
+      lookAt(r, 0, -1, 4600);
+      var beat = rnd(480, 600), apex = rnd(4, 12), cycle = beat * 2;
+      pumpArms(r, 4400, beat / 2, 2.5);
+      var balls = [0, 1, 2].map(function (i) {
+        var b = svgEl("circle", { cx: 0, cy: 0, r: 3.2, fill: ROBOT_PAL[(i + Math.floor(rnd(0, 6))) % 6] }, r.fx);
+        robotAnim(b, [{ transform: "translate(97px,52px)", easing: "ease-out" },
+                      { transform: "translate(120px," + apex + "px)", offset: .25, easing: "ease-in" },
+                      { transform: "translate(143px,52px)", offset: .5 },
+                      { transform: "translate(120px,57px)", offset: .75 },
+                      { transform: "translate(97px,52px)" }],
+                  { duration: cycle, iterations: 4, iterationStart: i / 3 });
+        return b;
+      });
+      var drop = Math.random() < .45;
+      robotLater(function () {
+        balls.forEach(function (b) { b.remove(); });
+        if (drop) {
+          robotSay("Oops");
+          var b = svgEl("circle", { cx: 0, cy: 0, r: 3.2, fill: pick(ROBOT_PAL) }, r.fx);
+          robotAnim(b, [{ transform: "translate(120px,-6px)", easing: "ease-in" },
+                        { transform: "translate(120px,33px)", offset: .4, easing: "ease-out" },
+                        { transform: "translate(150px,14px)", offset: .7, easing: "ease-in" },
+                        { transform: "translate(200px,75px)" }],
+                    { duration: 1100, fill: "both" });
+          robotAnim(r.hop, [{ transform: "scale(1,1)" }, { transform: "scale(1.12,.8)", offset: .45 },
+                            { transform: "scale(.96,1.05)", offset: .7 }, { transform: "scale(1,1)" }],
+                    { duration: 700, delay: 380 });
+          robotAnim(r.eyes, [{ transform: "scaleY(1)" }, { transform: "scaleY(.2)", offset: .2 },
+                             { transform: "scaleY(.2)", offset: .8 }, { transform: "scaleY(1)" }],
+                    { duration: 900, delay: 420 });
+        } else {
+          robotSay("Ta-da");
+          robotAnim(r.hop, [{ transform: "rotate(0deg)" }, { transform: "rotate(-12deg) translateY(1px)", offset: .5 },
+                            { transform: "rotate(0deg)" }], { duration: 800, easing: "ease-in-out" });
+          burst(r.fx, 120, 20, 12, 300);
+        }
+      }, cycle * 4 - 60);
+      return cycle * 4 + 1400;
+    },
+
+    fetch: function (r) {
+      var dir = Math.random() < .5 ? 1 : -1;
+      robotSay(pick(["Fetching a fresh copy", "Running to the printer", "Off to get the new version"]));
+      var paper = popIn(svgEl("g", {}, r.carry));
+      rect(paper, 106, 12, 28, 21, "rb-paper");
+      [16, 20, 24, 28].forEach(function (y, i) { rect(paper, 110, y, i === 3 ? 12 : 20, 1.4, "rb-ink"); });
+      lookAt(r, 1.5 * dir, 0, 1700);
+      walkLegs(r, 3900, 140);
+      robotAnim(r.pos, [{ transform: "translateX(0)", easing: "ease-in" }, { transform: "translateX(" + 215 * dir + "px)", offset: .42 },
+                        { transform: "translateX(" + -215 * dir + "px)", offset: .58, easing: "ease-out" },
+                        { transform: "translateX(0)" }], { duration: 3900 });
+      robotLater(function () {
+        while (paper.firstChild) paper.removeChild(paper.firstChild);
+        rect(paper, 106, 12, 28, 21, "rb-paper fresh");
+        svgEl("path", { d: "M113 22.5l4 4 8-8", "class": "rb-tick" }, paper);
+        lookAt(r, 1.5 * dir, 0, 1700);
+      }, 2000);
+      robotLater(function () { robotSay("Got the new version"); jump(r, 6, 0, 1); }, 4000);
+      return 5000;
+    },
+
+    idea: function (r) {
+      robotSay(pick(["Thinking it over", "Hmm", "Pondering your notes"]));
+      var think = svgEl("g", {}, r.fx);
+      [[152, 34, 1.6], [160, 26, 2.4], [170, 17, 3.2]].forEach(function (c, i) {
+        popIn(svgEl("circle", { cx: c[0], cy: c[1], r: c[2], "class": "rb-cloud" }, think), 250 + i * 300);
+      });
+      popIn(glyph(think, 184, 18, "?", "rb-big"), 1300);
+      lookAt(r, 1.5, -1, 2400);
+      robotAnim(r.hop, [{ transform: "rotate(0deg)" }, { transform: "rotate(-7deg)", offset: .2 },
+                        { transform: "rotate(-7deg)", offset: .8 }, { transform: "rotate(0deg)" }],
+                { duration: 2400, easing: "ease-in-out" });
+      robotLater(function () {
+        think.remove();
+        robotSay(pick(["Got an idea", "Eureka", "Aha"]));
+        var bulb = popIn(svgEl("g", {}, r.fx));
+        svgEl("circle", { cx: 120, cy: 16, r: 7, "class": "rb-bulb" }, bulb);
+        rect(bulb, 116.5, 22, 7, 4, "rb-dark");
+        var rays = origin(svgEl("g", {}, r.fx));
+        for (var i = 0; i < 8; i++) {
+          var a = i * Math.PI / 4;
+          svgEl("line", { x1: 120 + Math.cos(a) * 10, y1: 16 + Math.sin(a) * 10,
+                          x2: 120 + Math.cos(a) * 14, y2: 16 + Math.sin(a) * 14, "class": "rb-ray" }, rays);
+        }
+        robotAnim(rays, [{ opacity: 0, transform: "scale(.6) rotate(0deg)" }, { opacity: 1, transform: "scale(1.1) rotate(22deg)" }],
+                  { duration: 420, iterations: 5, direction: "alternate" });
+        pumpArms(r, 1600, 200, 4);
+        jump(r, 7, 100, 2);
+      }, 2500);
+      return 4900;
+    },
+
+    fishing: function (r) {
+      robotSay(pick(["Fishing out bugs", "Gone fishing for typos", "Casting for bugs"]));
+      var pond = svgEl("g", {}, r.back);
+      var wave = svgEl("path", { d: "M168 76 q5 -3 10 0 t10 0 t10 0 t10 0 t10 0 t10 0 t10 0", "class": "rb-water" }, pond);
+      robotAnim(wave, [{ transform: "translateX(0)" }, { transform: "translateX(-10px)" }], { duration: 900, iterations: 8 });
+      lookAt(r, 1.5, 0, 6000);
+      var rod = svgEl("g", {}, r.fx);
+      svgEl("line", { x1: 152, y1: 53, x2: 196, y2: 22, "class": "rb-rod" }, rod);
+      var line = origin(rect(rod, 195.6, 22, .8, 50, "rb-dark"), "50% 0%");
+      var bob = svgEl("g", {}, rod);
+      svgEl("circle", { cx: 196, cy: 72, r: 2.6, "class": "rb-bob" }, bob);
+      robotAnim(line, [{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }], { duration: 500, fill: "both", easing: "ease-out" });
+      robotAnim(bob, [{ transform: "translateY(-50px)" }, { transform: "translateY(0)" }], { duration: 500, fill: "both", easing: "ease-out" });
+      robotAnim(bob, [{ transform: "translateY(0)" }, { transform: "translateY(1.4px)" }, { transform: "translateY(0)" }],
+                { duration: 700, iterations: 4, delay: 500 });
+      var wait = rnd(1700, 2700);
+      robotLater(function () {
+        robotAnim(bob, [{ transform: "translateY(0)" }, { transform: "translateY(4px)" }, { transform: "translateY(0)" },
+                        { transform: "translateY(5px)" }, { transform: "translateY(0)" }], { duration: 500 });
+        robotAnim(r.eyes, [{ transform: "scale(1)" }, { transform: "scale(1.35)", offset: .3 }, { transform: "scale(1)" }], { duration: 700 });
+      }, wait);
+      var boot = Math.random() < .3;
+      robotLater(function () {
+        bob.remove();
+        robotAnim(r.hop, [{ transform: "rotate(0deg)" }, { transform: "rotate(-11deg)", offset: .3 }, { transform: "rotate(0deg)" }],
+                  { duration: 900, easing: "ease-out" });
+        robotAnim(line, [{ transform: "scaleY(1)" }, { transform: "scaleY(.3)" }], { duration: 450, fill: "both", easing: "ease-in" });
+        var catchG = svgEl("g", {}, rod);
+        var c = origin(svgEl("g", {}, catchG), "50% 0%");
+        if (boot) {
+          rect(c, 192, 37, 5, 8, "rb-dark");
+          rect(c, 192, 43, 10, 4, "rb-dark");
+        } else {
+          svgEl("ellipse", { cx: 196, cy: 41, rx: 4, ry: 5, "class": "rb-bug" }, c);
+          [[191, 38], [191, 42], [199, 38], [199, 42]].forEach(function (p) { rect(c, p[0], p[1], 2, 1, "rb-dark"); });
+          rect(c, 195, 35, 2, 2, "rb-dark");
+        }
+        robotAnim(catchG, [{ transform: "translateY(36px)" }, { transform: "translateY(0)" }], { duration: 450, fill: "both", easing: "ease-in" });
+        robotAnim(c, [{ transform: "rotate(-18deg)" }, { transform: "rotate(18deg)" }],
+                  { duration: 180, iterations: 8, direction: "alternate", delay: 450 });
+        robotSay(boot ? "Caught a boot" : "Caught a bug");
+        robotLater(function () {
+          catchG.remove();
+          burst(r.fx, 196, 41, 9);
+          if (boot) robotAnim(r.hop, [{ transform: "translateX(0)" }, { transform: "translateX(-1px)" }, { transform: "translateX(1px)" },
+                                      { transform: "translateX(0)" }], { duration: 160, iterations: 4 });
+          else jump(r, 5, 80, 1);
+        }, 1700);
+      }, wait + 550);
+      return wait + 3300;
+    },
+
+    dance: function (r) {
+      robotSay(pick(["Dancing while it waits", "Busting a move", "A little victory dance"]));
+      var beat = rnd(320, 400), beats = 12;
+      var floor = svgEl("g", {}, r.back);
+      var tiles = [];
+      for (var i = 0; i < 8; i++) tiles.push(rect(floor, 60 + i * 15, 79, 14, 4, ""));
+      tiles.forEach(function (t, i) {
+        t.setAttribute("fill", ROBOT_PAL[i % 6]);
+        robotAnim(t, [{ opacity: .15 }, { opacity: .9 }, { opacity: .15 }],
+                  { duration: beat * 2, iterations: beats / 2, delay: (i % 3) * beat * .66 });
+      });
+      robotAnim(r.hop, [{ transform: "translateY(0) rotate(0deg)" }, { transform: "translateY(-4px) rotate(-9deg)", offset: .25 },
+                        { transform: "translateY(0) rotate(0deg)", offset: .5 }, { transform: "translateY(-4px) rotate(9deg)", offset: .75 },
+                        { transform: "translateY(0) rotate(0deg)" }],
+                { duration: beat * 4, iterations: beats / 4, easing: "ease-in-out" });
+      pumpArms(r, beat * beats, beat, 4);
+      robotAnim(r.pos, [{ transform: "translateX(0)" }, { transform: "translateX(-18px)", offset: .25 },
+                        { transform: "translateX(18px)", offset: .75 }, { transform: "translateX(0)" }],
+                { duration: beat * beats, easing: "ease-in-out" });
+      for (var n = 0; n < 7; n++) {
+        floatAway(glyph(r.fx, rnd(70, 170), rnd(40, 60), pick(["♪", "♫", "♩"]), "rb-note"),
+                  rnd(-16, 16), rnd(-30, -40), 1400, n * beat * 1.6);
+      }
+      robotLater(function () { robotSay("Nailed it"); burst(r.fx, 120, 24, 14); }, beat * beats);
+      return beat * beats + 900;
+    },
+
+    coffee: function (r) {
+      robotSay(pick(["Refueling", "Coffee break", "One more coffee"]));
+      var cup = popIn(svgEl("g", {}, r.carry));
+      rect(cup, 152, 44, 9, 10, "rb-paper");
+      svgEl("path", { d: "M161 46.5h2.5v4.5h-2.5", "class": "rb-handle" }, cup);
+      for (var i = 0; i < 3; i++) {
+        floatAway(svgEl("path", { d: "M" + (154 + i * 2.5) + " 41 q-2 -3 0 -5 t0 -5", "class": "rb-steam" }, r.carry),
+                  rnd(-3, 3), -14, 1300, 200 + i * 450);
+      }
+      origin(cup, "50% 100%");
+      var sip = [{ transform: "translate(0,0) rotate(0deg)" }, { transform: "translate(-15px,-1px) rotate(-25deg)", offset: .3 },
+                 { transform: "translate(-15px,-1px) rotate(-25deg)", offset: .7 }, { transform: "translate(0,0) rotate(0deg)" }];
+      robotAnim(cup, sip, { duration: 1100, delay: 900 });
+      robotAnim(cup, sip, { duration: 1100, delay: 2300 });
+      robotAnim(r.armR, [{ transform: "translate(0,0)" }, { transform: "translate(-3px,-2px)", offset: .3 },
+                         { transform: "translate(-3px,-2px)", offset: .7 }, { transform: "translate(0,0)" }],
+                { duration: 1100, delay: 900, iterations: 1 });
+      robotLater(function () {
+        robotSay(pick(["Fully charged", "Wide awake", "Turbo mode"]));
+        robotAnim(r.eyes, [{ transform: "scale(1)" }, { transform: "scale(1.5)", offset: .1 }, { transform: "scale(1.5)", offset: .9 },
+                           { transform: "scale(1)" }], { duration: 1500 });
+        robotAnim(r.hop, [{ transform: "translateX(-.8px)" }, { transform: "translateX(.8px)" }],
+                  { duration: 45, iterations: 30, direction: "alternate" });
+        for (var z = 0; z < 4; z++) {
+          var x = pick([82, 92, 148, 158]), y = rnd(26, 44);
+          floatAway(svgEl("path", { d: "M" + x + " " + y + "l3 -4h-2l3 -5", "class": "rb-zap" }, r.fx), rnd(-6, 6), -8, 600, z * 220);
+        }
+      }, 3500);
+      return 5300;
+    },
+
+    sweep: function (r) {
+      robotSay(pick(["Sweeping up typos", "Tidying the page", "Cleaning up"]));
+      var words = ROBOT_TYPOS.slice().sort(function () { return Math.random() - .5; }).slice(0, 3);
+      var spots = [180, 224, 268], reach = [300, 900, 2000];
+      var junk = words.map(function (w, i) { return glyph(r.fx, spots[i], 76, w, "rb-typo"); });
+      var broom = origin(svgEl("g", {}, r.carry), "50% 0%");
+      svgEl("line", { x1: 152, y1: 46, x2: 166, y2: 75, "class": "rb-rod" }, broom);
+      rect(broom, 161, 74, 12, 4, "rb-broom");
+      robotAnim(broom, [{ transform: "rotate(-10deg)" }, { transform: "rotate(12deg)" }],
+                { duration: 260, iterations: 18, direction: "alternate", easing: "ease-in-out" });
+      lookAt(r, 1.5, 1, 2700);
+      walkLegs(r, 2600, 160);
+      robotAnim(r.pos, [{ transform: "translateX(0)" }, { transform: "translateX(100px)" }], { duration: 2600, fill: "forwards", easing: "ease-in-out" });
+      junk.forEach(function (j, i) {
+        robotLater(function () {
+          floatAway(j, rnd(50, 80), rnd(-24, -6), 800);
+          burst(r.fx, spots[i], 74, 5);
+        }, reach[i]);
+      });
+      robotLater(function () {
+        robotSay(pick(["Spotless", "All clean", "Much better"]));
+        lookAt(r, -1.5, 0, 2200);
+        walkLegs(r, 2000, 160);
+        robotAnim(r.pos, [{ transform: "translateX(100px)" }, { transform: "translateX(0)" }],
+                  { duration: 2000, fill: "forwards", easing: "ease-in-out" });
+      }, 2800);
+      return 5300;
+    }
+  };
+
+  /* Each open picks how the robot walks on stage, too. */
+  function robotEnter(r) {
+    var way = pick(["drop", "slide", "rise", "beam"]);
+    if (way === "drop") {
+      robotAnim(r.pos, [{ transform: "translateY(-90px)", easing: "ease-in" }, { transform: "translateY(0)", offset: .55, easing: "ease-out" },
+                        { transform: "translateY(-12px)", offset: .75, easing: "ease-in" }, { transform: "translateY(0)" }],
+                { duration: 900 });
+      robotAnim(r.hop, [{ transform: "scale(1,1)" }, { transform: "scale(1.15,.8)" }, { transform: "scale(1,1)" }], { duration: 300, delay: 480 });
+    } else if (way === "slide") {
+      var d = Math.random() < .5 ? -1 : 1;
+      walkLegs(r, 1000, 120);
+      lookAt(r, -1.5 * d, 0, 1100);
+      robotAnim(r.pos, [{ transform: "translateX(" + 215 * d + "px)" }, { transform: "translateX(0)" }], { duration: 1000, easing: "ease-out" });
+    } else if (way === "rise") {
+      origin(r.pos, "50% 100%");
+      robotAnim(r.pos, [{ transform: "scaleY(0)" }, { transform: "scaleY(1.2)", offset: .7 }, { transform: "scaleY(1)" }],
+                { duration: 650, easing: "ease-out" });
+    } else {
+      robotAnim(r.pos, [{ opacity: 0 }, { opacity: 1 }, { opacity: .1 }, { opacity: 1 }, { opacity: .3 }, { opacity: 1 }], { duration: 800 });
+      burst(r.fx, 120, 50, 12, 500);
+    }
+    robotSay(pick(["Hello", "Hi there", "On it", "Reporting for duty"]));
+    return 1200;
+  }
+
+  function robotBlink() {
+    if (!robot) return;
+    robotAnim(robot.parts.eyes, [{ transform: "scaleY(1)" }, { transform: "scaleY(.1)" }, { transform: "scaleY(1)" }], { duration: 170 });
+    robotLater(robotBlink, rnd(1800, 4200));
+  }
+
+  function robotNext() {
+    var r = robot;
+    if (!r) return;
+    if (!r.queue.length) r.queue = robotOrder(Object.keys(ROBOT_SCENES), r.prev, Math.random);
+    var name = r.queue.shift();
+    r.prev = name;
+    var p = r.parts;
+    r.anims.forEach(function (a) { try { a.cancel(); } catch (e) { /* already gone */ } });
+    r.anims = [];
+    [p.fx, p.back, p.carry].forEach(function (g) { while (g.firstChild) g.removeChild(g.firstChild); });
+    var ms = ROBOT_SCENES[name](p);
+    robotLater(robotNext, ms + rnd(300, 700));
+  }
+
+  function startRobot() {
+    stopRobot();
+    var stage = doc.querySelector(".robot-stage"), caption = doc.querySelector(".robot-caption");
+    if (!stage) return;
+    robot = { anims: [], timers: [], queue: [], prev: null, caption: caption };
+    robot.parts = buildRobot(stage);
+    if (reduceMotion || !stage.animate) {
+      if (caption) { caption.textContent = "Waiting for the new version"; caption.classList.add("is-on"); }
+      return;
+    }
+    var last = null;
+    try { last = localStorage.getItem(ROBOT_LAST); } catch (e) { /* blocked storage */ }
+    robot.queue = robotOrder(Object.keys(ROBOT_SCENES), last, Math.random);
+    try { localStorage.setItem(ROBOT_LAST, robot.queue[0]); } catch (e) { /* blocked storage */ }
+    robotLater(robotBlink, rnd(900, 2000));
+    robotLater(robotNext, robotEnter(robot.parts));
+  }
+
+  function stopRobot() {
+    if (!robot) return;
+    robot.anims.forEach(function (a) { try { a.cancel(); } catch (e) { /* already gone */ } });
+    robot.timers.forEach(clearTimeout);
+    var stage = doc.querySelector(".robot-stage");
+    while (stage && stage.firstChild) stage.removeChild(stage.firstChild);
+    if (robot.caption) { robot.caption.classList.remove("is-on"); robot.caption.textContent = ""; }
+    robot = null;
+  }
+
   /* ---------------------------------------------------- finish overlay */
 
   var IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || "");
@@ -2682,6 +3162,12 @@
     root.querySelector(".finish-title-text").textContent = c.title;
     finishEl("finish-text").textContent = c.text;
     root.classList.toggle("is-wait", !!c.wait);
+    root.setAttribute("data-kind", kind);
+    /* The header and footer stay sharp above the blur; the header shows the
+       whole title, as resting on it would. */
+    doc.body.classList.add("finishing");
+    var header = doc.querySelector("header");
+    if (header) header.classList.add("title-peek");
     var close = finishEl("finish-close");
     close.hidden = !c.close;
     disarmClose();
@@ -2689,6 +3175,7 @@
     void root.offsetWidth;            // commit the hidden state so the fade runs
     root.classList.add("is-open");
     if (c.wait) startWaiting();
+    if (kind === "changes") startRobot(); else stopRobot();
     (c.close ? close : finishEl("finish-cancel")).focus();
   }
 
@@ -2697,8 +3184,12 @@
     if (!root || !finishKind) return;
     finishKind = null;
     stopWaiting();
+    stopRobot();
     disarmClose();
     root.classList.remove("is-open");
+    doc.body.classList.remove("finishing");
+    var header = doc.querySelector("header");
+    if (header) header.classList.remove("title-peek");
     setTimeout(function () { if (!finishKind) root.hidden = true; }, reduceMotion ? 0 : 240);
     if (restoreFocus !== false && finishFrom && finishFrom.focus) finishFrom.focus();
   }
@@ -3014,6 +3505,7 @@
     if (!title) return;
     title.addEventListener("mouseenter", function () {
       clearTimeout(peekTimer);
+      if (finishOpen()) return;
       peekTimer = setTimeout(function () {
         if (title.scrollWidth <= title.clientWidth + 1) return;
         header.classList.add("title-peek");
@@ -3021,6 +3513,7 @@
     });
     title.addEventListener("mouseleave", function () {
       clearTimeout(peekTimer);
+      if (finishOpen()) return;
       header.classList.remove("title-peek");
     });
   }

@@ -136,7 +136,8 @@ try {
     const s = getSelection(); s.removeAllRanges(); s.addRange(r);
     el.focus(); return true; })()`);
   await p.send("Input.insertText", { text: "forty-three" });
-  await evaluate(p, click("[data-mode=comment]"));
+  // The shot stays in Edit text mode, so the header shows which mode made the change.
+  await evaluate(p, "document.activeElement.blur(), true");
   await sleep(300);
   await evaluate(p, `document.querySelector("mark.edited").scrollIntoView({ block: "center" })`);
   await shoot(p, "edit");

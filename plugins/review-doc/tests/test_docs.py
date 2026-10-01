@@ -11,7 +11,6 @@ import settings
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 SECTIONS = ["What it does", "Install", "First use", "Plan review", "Settings",
             "Advanced: choice screens", "Troubleshooting", "Manual install",
-            "Also in this repository: context-warning",
             "License and credit"]
 SHOTS = ["page", "comment", "edit", "settings", "reload", "plan", "choice"]
 
@@ -32,7 +31,7 @@ def test_readme_names_the_real_commands_and_settings():
     text = read("README.md")
     for needle in ("/plugin marketplace add filmuszynski/skills",
                    "/plugin install review-doc@filmuszynski-skills", "/reload-plugins",
-                   "/review-doc:review-doc", "/review-doc:settings", "Python 3.10",
+                   "/review-doc notes.md", "/review-doc:review-doc", "/review-doc:settings", "Python 3.10",
                    "127.0.0.1", "7777", "TERM_PROGRAM", "server.log"):
         assert needle in text, needle
     for name in settings.CLI_NAMES:

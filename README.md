@@ -53,10 +53,11 @@ pages open in your normal browser.
 Ask Claude to review a document:
 
 ```
-/review-doc:review-doc notes.md
+/review-doc notes.md
 ```
 
-or just say "let me review notes.md in the browser". The page opens on its own and
+or just say "let me review notes.md in the browser". If another skill is also called
+`review-doc`, use the full name, `/review-doc:review-doc`. The page opens on its own and
 Claude also gives you the link. Comment, rewrite, approve or decline, then press one of
 the buttons at the bottom and paste what it copied into Claude.
 
@@ -144,17 +145,6 @@ then in Claude Code, with the path to the clone:
 To install the VS Code extension by hand, download `review-doc-opener.vsix` from the
 [latest release](https://github.com/filmuszynski/skills/releases/latest) and run
 `code --install-extension review-doc-opener.vsix`.
-
-## Also in this repository: context-warning
-
-A coloured line in the terminal when a session's context window passes 30, 40 and 50
-percent, on every prompt from 30. Install it from the same marketplace:
-
-```
-/plugin install context-warning@filmuszynski-skills
-```
-
-Details in [plugins/context-warning/README.md](plugins/context-warning/README.md).
 
 ## License and credit
 
