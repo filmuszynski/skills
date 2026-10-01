@@ -656,6 +656,8 @@ main { min-height: 0; }
 #doc th { background: var(--surface); }
 /* A header row with nothing in it is Markdown's price for a table, not content. */
 #doc thead.blank { display: none; }
+/* With no header row, the first column is the header, as in a plan's At a glance box. */
+#doc thead.blank + tbody > tr > td:first-child { background: var(--surface); font-weight: bold; }
 #doc hr { border: 0; border-top: 1px solid var(--line); margin: .93em 0; }
 #doc code { background: var(--surface); padding: .07em .29em; border-radius: 3px; font-size: .87em; font-family: var(--mono); }
 

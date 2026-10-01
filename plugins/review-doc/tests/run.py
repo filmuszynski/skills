@@ -1745,6 +1745,8 @@ def test_blank_table_header_is_marked_and_hidden():
     assert '<thead class="blank">' in html, html
     css = io.open(os.path.join(PRESENTER, "assets", "shell.css"), encoding="utf-8").read()
     assert "#doc thead.blank { display: none; }" in css
+    assert "#doc thead.blank + tbody > tr > td:first-child { background: var(--surface); font-weight: bold; }" in css
+    assert re.search(r'<thead class="blank">.*?</thead>\s*<tbody>', html, re.S), html
 
 
 @test
