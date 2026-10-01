@@ -10,6 +10,10 @@ import drafts
 import paths
 import settings
 
+# The slug of an HTML page is also the frame's host name, <slug>.localhost, so it
+# must be a DNS label: lowercase letters, digits and inner hyphens, at most 63 (1.2).
+HTML_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
 
 def prune(home=None, now=None, hours=None):
     """Delete pages/*.html older than the window. Nothing else, no subfolders."""
