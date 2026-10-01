@@ -629,43 +629,78 @@
     tag.insertBefore(m, num ? num.nextSibling : tag.firstChild);
   }
 
+  /* Which element an earlier edit belongs to: the first one whose whole text,
+     squeezed, is exactly the edit's new text and that no other edit of the
+     same round has claimed. A section-wide substring search put "Yes" inside
+     "Yesterday" and sent two cells both rewritten to "Done" to the first one.
+     -1 when no element matches. */
+  function pickEditElement(texts, want, taken) {
+    for (var i = 0; i < texts.length; i++) if (!taken[i] && texts[i] === want) return i;
+    return -1;
+  }
+
+  /* Where an earlier edit's runs sit: its own element when one matches,
+     otherwise an exact match anywhere in the section. Drift is never good
+     enough, the run offsets only hold on the exact new text. */
+  function earlierEditBase(sec, ed, claimed) {
+    var want = squeeze(ed.neu || "");
+    if (!want) return null;
+    var els = sec.querySelectorAll("[data-edit-id]"), texts = [], taken = [], flats = [];
+    for (var i = 0; i < els.length; i++) {
+      flats.push(flatten(els[i]));
+      texts.push(flats[i].text);
+      taken.push(claimed.indexOf(els[i]) !== -1);
+    }
+    var at = pickEditElement(texts, want, taken);
+    if (at !== -1) { claimed.push(els[at]); return { flat: flats[at], start: 0 }; }
+    var flat = flatten(sec), start = flat.text.indexOf(want);
+    return start === -1 ? null : { flat: flat, start: start };
+  }
+
   function anchorEarlier() {
     prevInfo = {};
     (state.data.rounds || []).forEach(function (round, ri) {
+      if (!round || typeof round !== "object") return;
       var r = "r" + ri + ":";
-      Object.keys(round.marks || {}).forEach(function (id) {
+      /* One per round: two edits of the same round never share an element. */
+      var claimed = [];
+      /* Earlier rounds are decoration. A malformed entry, or a range that no
+         longer fits, must not stop the decisions, notes and choices that
+         applyDataToDoc paints after this. */
+      function guarded(fn) {
+        return function (id) { try { fn(id); } catch (e) { /* skip this one */ } };
+      }
+      Object.keys(round.marks || {}).forEach(guarded(function (id) {
         var mk = round.marks[id], sec = mk.sec ? secEl(mk.sec) : null, key = r + id;
         prevInfo[key] = { kind: "comment", quote: mk.quote, comment: mk.comment };
         var hit = sec ? locateQuote(sec, mk.quote, mk.occ || 0) : null;
         if (hit && hit.range) wrapRange(hit.range, key, "prev-comment", "data-prev");
         else if (sec) prevPill(sec, key, "comment");
-      });
-      Object.keys(round.edits || {}).forEach(function (eid) {
+      }));
+      Object.keys(round.edits || {}).forEach(guarded(function (eid) {
         var ed = round.edits[eid], sec = ed.sec ? secEl(ed.sec) : null;
-        var base = sec ? locateQuote(sec || docEl, ed.neu, 0) : null;
-        var runs = base && !base.drift ? runOffsets(ed.alt, ed.neu) : [];
+        var base = sec ? earlierEditBase(sec, ed, claimed) : null;
+        var runs = base ? runOffsets(ed.alt || "", ed.neu || "") : [];
         if (!runs.length) {
           prevInfo[r + eid] = { kind: "edit", was: ed.alt, now: ed.neu };
           prevPill(sec, r + eid, "earlier edit");
           return;
         }
-        /* The same offset locateQuote found for its exact match. The runs are
-           wrapped last to first: wrapping splits text nodes, and a split only
-           shortens the node to the LEFT of the cut, so the map positions of
-           the runs still to come stay true. */
-        var flat = flatten(sec), start = flat.text.indexOf(squeeze(ed.neu));
+        /* The runs are wrapped last to first: wrapping splits text nodes, and a
+           split only shortens the node to the LEFT of the cut, so the map
+           positions of the runs still to come stay true. */
         for (var k = runs.length - 1; k >= 0; k--) {
           var run = runs[k], key = r + eid + ":" + k;
           prevInfo[key] = { kind: "edit", was: run.was, now: run.now };
-          var range = rangeAt(flat, start + run.s, start + run.e);
+          var range = rangeAt(base.flat, base.start + run.s, base.start + run.e);
           if (range) wrapRange(range, key, "prev-edit", "data-prev");
         }
-      });
-      Object.keys(round.tables || {}).forEach(function (tid) {
+      }));
+      Object.keys(round.tables || {}).forEach(guarded(function (tid) {
         var st = round.tables[tid], sec = st.sec ? secEl(st.sec) : null;
         prevInfo[r + tid] = { kind: "edit", was: "", now: "", table: true };
         prevPill(sec, r + tid, "earlier table change");
-      });
+      }));
     });
   }
 
@@ -3039,11 +3074,12 @@
       var note = t.closest ? t.closest(".note-btn") : null;
       if (note) { ev.preventDefault(); noteFor(note.getAttribute("data-for"), note); return; }
 
-      /* An earlier round's mark, unless a current comment sits around it: the
-         current one keeps its own bubble. In edit mode a click inside an
-         editable places the caret, so no bubble there either. */
+      /* An earlier round's mark, unless a current comment or rewrite sits
+         around it: the current one keeps its own bubble, and its Revert. In
+         edit mode a click inside an editable places the caret, so no bubble
+         there either. */
       var pm = t.closest ? t.closest("[data-prev]") : null;
-      if (pm && !(t.closest && t.closest("mark.has-comment"))
+      if (pm && !(t.closest && (t.closest("mark.has-comment") || t.closest("mark.edited")))
           && !(state.mode === "edit" && pm.closest("[data-edit-id]"))) {
         ev.preventDefault(); showEarlier(pm); return;
       }

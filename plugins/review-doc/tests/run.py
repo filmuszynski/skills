@@ -1953,10 +1953,42 @@ def test_earlier_marks_draw_after_current_and_open_read_only():
     assert '"Earlier round"' in sp and "Delete" not in sp and "Revert" not in sp
     ae = fn_body_run(src, "anchorEarlier")
     assert '"earlier edit"' in ae and '"earlier table change"' in ae
-    assert "locateQuote(sec || docEl, ed.neu" in ae, "edits anchor inside their own new text"
+    assert "earlierEditBase(sec, ed, claimed)" in ae, "edits anchor on their own element first"
+    assert "sec || docEl" not in ae
     st = fn_body_run(src, "start")
     assert st.index('closest("[data-prev]")') < st.index('closest("mark.has-comment")'), \
         "an earlier mark is checked before the current-comment branch"
+    pm = st[st.index('closest("[data-prev]")'):st.index("showEarlier(pm)")]
+    assert 't.closest("mark.has-comment")' in pm and 't.closest("mark.edited")' in pm, \
+        "an earlier mark inside a current comment or rewrite leaves the click to it"
+
+
+@test
+def test_earlier_edit_picks_the_first_unclaimed_exact_element():
+    pick = lambda texts, want, taken: run_js(["pickEditElement"], "pickEditElement(%s, %s, %s)" % (
+        json.dumps(texts), json.dumps(want), json.dumps(taken)))
+    # "Yes" never lands inside "Yesterday"; whole-text match only.
+    assert pick(["Yesterday", "Yes"], "Yes", [False, False]) == 1
+    # Two cells both rewritten to "Done": the second edit takes the second cell.
+    assert pick(["Done", "Open", "Done"], "Done", [False, False, False]) == 0
+    assert pick(["Done", "Open", "Done"], "Done", [True, False, False]) == 2
+    assert pick(["Done", "Done"], "Done", [True, True]) == -1
+    assert pick(["Plants"], "Plant", [False]) == -1
+
+
+@test
+def test_earlier_edits_claim_per_round_and_never_break_painting():
+    src = shell._asset("shell.js")
+    ae = fn_body_run(src, "anchorEarlier")
+    assert ae.index("var claimed = [];") > ae.index("forEach(function (round, ri)"), "one claimed set per round"
+    assert "try { fn(id); } catch (e)" in ae, "a bad entry is skipped, never thrown into applyDataToDoc"
+    assert 'if (!round || typeof round !== "object") return;' in ae
+    for kind in ("marks", "edits", "tables"):
+        assert "Object.keys(round.%s || {}).forEach(guarded(" % kind in ae, kind
+    eb = fn_body_run(src, "earlierEditBase")
+    assert "pickEditElement(texts, want, taken)" in eb and "claimed.push(els[at])" in eb
+    assert "start: 0" in eb
+    assert "flat.text.indexOf(want)" in eb, "the section fallback stays exact-match only"
     c = shell._asset("shell.css")
     assert "mark.prev-comment" in c and "mark.prev-edit" in c
     assert "mark.has-comment mark.prev-comment" in c and "mark.edited mark.prev-edit" in c
