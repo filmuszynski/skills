@@ -17,7 +17,7 @@ TAG = '<script src="/__review-doc/probe.js" nonce="abc123"></script>'
 def test_html_slug_is_a_dns_label():
     for ok in ("a", "site-index-1a2b3c", "x" * 63, "9"):
         assert pages.HTML_SLUG_RE.match(ok), ok
-    for bad in ("", "-a", "a-", "A", "a_b", "a.b", "x" * 64, "a b", "über"):
+    for bad in ("", "-a", "a-", "A", "a_b", "a.b", "x" * 64, "a b", "über", "a\n"):
         assert not pages.HTML_SLUG_RE.match(bad), bad
 
 
@@ -230,3 +230,31 @@ def test_file_target_only_for_html_file_pages():
                 {"kind": "html", "target": dict(t, entry=".env")},
                 {"kind": "html", "target": dict(t, root=os.path.join(root, "nope"))}):
         assert frame_server.file_target(bad) is None, bad
+
+
+@test
+def test_resolve_refuses_an_index_file_link_and_a_directory_link_out_of_the_root():
+    root = _site()
+    outside = os.path.join(os.path.dirname(root), "elsewhere2")
+    os.makedirs(outside)
+    with open(os.path.join(outside, "index.html"), "w", encoding="utf-8", newline="") as fh:
+        fh.write("outside")
+    d = os.path.join(root, "linkdir")
+    os.makedirs(d)
+    try:
+        os.symlink(os.path.join(outside, "index.html"), os.path.join(d, "index.html"))
+    except (OSError, AttributeError, NotImplementedError) as exc:
+        print("  (skip) cannot create a file link here: %s" % exc)
+    else:
+        assert frame_server.resolve(root, "/linkdir/") is None
+    link = os.path.join(root, "linked")
+    try:
+        if os.name == "nt":
+            import _winapi
+            _winapi.CreateJunction(outside, link)
+        else:
+            os.symlink(outside, link)
+    except (OSError, AttributeError) as exc:
+        print("  (skip) cannot create a link here: %s" % exc)
+        return
+    assert frame_server.resolve(root, "/linked/") is None

@@ -120,7 +120,7 @@ def rewrite_meta_csp(text, nonce):
 _HEAD_RE = re.compile(r"<head(?=[\s>/])[^>]*>", re.I)
 # What may come before the probe when there is no <head>: a BOM, comments, the
 # doctype and the <html> start tag. A script before the doctype means quirks mode.
-_LEAD_RE = re.compile(r"\A﻿?(?:\s*(?:<!--.*?-->\s*)*<!doctype[^>]*>)?"
+_LEAD_RE = re.compile(r"\A\ufeff?(?:\s*(?:<!--.*?-->\s*)*<!doctype[^>]*>)?"
                       r"(?:\s*(?:<!--.*?-->\s*)*<html(?=[\s>])[^>]*>)?", re.I | re.S)
 
 
@@ -184,7 +184,12 @@ def resolve(root, url_path):
     if _hidden(os.path.relpath(target, real_root).replace("\\", "/").split("/")):
         return None
     if os.path.isdir(target):
-        target = os.path.join(target, "index.html")
+        # The index file may itself be a link: judge the file it really is.
+        target = os.path.realpath(os.path.join(target, "index.html"))
+        if not _inside(real_root, target):
+            return None
+        if _hidden(os.path.relpath(target, real_root).replace("\\", "/").split("/")):
+            return None
     if os.path.splitext(target)[1].lower() not in TYPES or not os.path.isfile(target):
         return None
     return target
