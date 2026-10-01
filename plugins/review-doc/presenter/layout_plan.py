@@ -19,7 +19,7 @@ import re
 import layout_tables
 import shell
 from layout_common import (MD_EXTENSIONS, _esc, _hash, _mask_pre, _md,  # noqa: F401
-                           _unmask_pre)
+                           _unmask_pre, facts_rows)
 
 
 RE_TASK = re.compile(r"^###\s+Task\s+(\d+)\s*[:.]\s*(.+?)\s*$", re.I)
@@ -358,12 +358,12 @@ def _cell_html(text):
     return html
 
 
-def _meta_html(plan):
+def _meta_html(plan, facts=None):
     notes = plan.get("preamble", "")
-    if not plan["meta"] and not notes:
+    if not plan["meta"] and not notes and not facts:
         return ""
     rows = "".join("<tr><th>%s</th><td>%s</td></tr>" % (_esc(k), _cell_html(v))
-                   for k, v in plan["meta"].items())
+                   for k, v in plan["meta"].items()) + facts_rows(facts)
     table = "<table>%s</table>" % rows if rows else ""
     # Text written before the first field leads, above the table, as it does in
     # the source.
@@ -379,12 +379,12 @@ def slug_for(source):
     return base or "plan"
 
 
-def build(raw, source, slug=None, generated_at=""):
+def build(raw, source, slug=None, generated_at="", facts=None):
     """Plan Markdown to the keyword arguments shell.render takes."""
     plan = parse(raw)
     used = set()
 
-    body = [_meta_html(plan)]
+    body = [_meta_html(plan, facts)]
     rows = []
     for sec in plan["sections"]:
         body.append(_section_html(sec, used))

@@ -348,3 +348,62 @@ def test_glance_css_covers_documents():
     for sel in rules:
         glance = ".sec.lead.glance:hover" if ":hover" in sel else ".sec.lead.glance"
         assert weight(glance) > weight(sel), "%s ties or beats the glance border" % sel
+
+
+FACTS = [("Draft", "2"), ("Created", "01.10.2026 14:02"), ("Last edited", "01.10.2026 22:14")]
+FACT_ROWS = ('<tr class="glance-fact"><th>Draft</th><td>2</td></tr>'
+             '<tr class="glance-fact"><th>Created</th><td>01.10.2026 14:02</td></tr>'
+             '<tr class="glance-fact"><th>Last edited</th><td>01.10.2026 22:14</td></tr>')
+
+
+@test
+def test_plan_box_ends_with_the_facts():
+    html = layout_plan._meta_html(layout_plan.parse("# P\n\n**Goal:** g\n\n## Task 1: t\n\nx\n"), FACTS)
+    assert html.endswith(FACT_ROWS + "</table></div>"), html
+    assert html.index("<th>Goal</th>") < html.index("<th>Draft</th>")
+
+
+@test
+def test_plan_with_nothing_gets_a_box_of_facts():
+    plan = layout_plan.parse("# P\n\n## Task 1: t\n\nx\n")
+    assert layout_plan._meta_html(plan) == "", "without facts nothing changes"
+    html = layout_plan._meta_html(plan, FACTS)
+    assert html == ('<div class="sec" data-sec="__meta"><div class="sec-tag"></div>'
+                    "<h2>At a glance</h2><table>" + FACT_ROWS + "</table></div>"), html
+
+
+@test
+def test_doc_box_with_fields_ends_with_the_facts_and_keeps_its_buttons():
+    out = layout_doc.build("# D\n\n**Status:** draft\n\n## One\n\nText.\n", "d.md", facts=FACTS)["body_html"]
+    box = out[out.index('<div class="sec lead glance"'):]
+    box = box[:box.index("</table></div>") + len("</table></div>")]
+    assert 'class="note-btn"' in box and 'class="dec"' in box
+    assert box.endswith(FACT_ROWS + "</table></div>"), box
+
+
+@test
+def test_doc_without_fields_gets_a_button_less_box_above_the_intro():
+    out = layout_doc.build("# D\n\nAn intro line.\n\n## One\n\nText.\n", "d.md", facts=FACTS)["body_html"]
+    assert out.startswith('<div class="plain"><div class="sec" data-sec="__meta"><div class="sec-tag"></div>'
+                          "<h2>At a glance</h2><table>" + FACT_ROWS + "</table></div>"), out[:400]
+    assert "An intro line." in out[out.index("</table></div>"):], "the intro stays a section below"
+
+
+@test
+def test_doc_without_preamble_still_gets_the_box():
+    out = layout_doc.build("# D\n\n## One\n\nText.\n", "d.md", facts=FACTS)["body_html"]
+    assert FACT_ROWS in out
+
+
+@test
+def test_fact_rows_are_never_editable():
+    import re
+    out = layout_doc.build("# D\n\n**Status:** draft\n\n## One\n\nText.\n", "d.md", facts=FACTS)["body_html"]
+    for row in re.findall(r'<tr class="glance-fact">.*?</tr>', out):
+        assert "data-edit-id" not in row and "data-sec" not in row, row
+
+
+@test
+def test_fact_values_are_escaped():
+    from layout_common import facts_rows
+    assert facts_rows([("A<b", "1 & 2")]) == '<tr class="glance-fact"><th>A&lt;b</th><td>1 &amp; 2</td></tr>'

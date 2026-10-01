@@ -77,3 +77,11 @@ def _unmask_pre(html, blocks):
 def _esc(text):
     return (text.replace("&", "&amp;").replace("<", "&lt;")
                 .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def facts_rows(facts):
+    """The At a glance box's closing rows: Draft, Created, Last edited (1.1.5).
+    Chrome, not document: no data-edit-id, no data-sec, so they are never edited,
+    and the page ignores a selection that touches them."""
+    return "".join('<tr class="glance-fact"><th>%s</th><td>%s</td></tr>' % (_esc(k), _esc(v))
+                   for k, v in (facts or []))

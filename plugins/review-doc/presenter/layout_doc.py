@@ -32,6 +32,7 @@ import os
 import re
 
 import shell
+from layout_common import facts_rows
 from layout_plan import (RE_FENCE, RE_H2, _esc, _fence_marks, _hash, _md,
                          _render_block, _strip_bom, _strip_front_matter,
                          _trim_block, header_blocks)
@@ -217,7 +218,7 @@ def slug_for_path(source):
     return base or "document"
 
 
-def _glance_html(intro, lines, used):
+def _glance_html(intro, lines, used, facts=None):
     """The plan's At a glance box, on the lead block's real id, so a comment on
     it reaches the prompt (the plan box's __meta id never did). None when the
     lead has no **Key:** line."""
@@ -230,7 +231,7 @@ def _glance_html(intro, lines, used):
     rows = "".join(
         "<tr><th>%s</th><td>%s</td></tr>"
         % (_esc(k), _render_block(_trim_block(v), sid, used))
-        for k, v in meta.items())
+        for k, v in meta.items()) + facts_rows(facts)
     lead = _trim_block(notes)
     lead_html = ('<div class="glance-notes">%s</div>' % _render_block(lead, sid, used)
                  if lead.strip() else "")
@@ -244,7 +245,14 @@ def _glance_html(intro, lines, used):
             % (_esc(sid), _esc(sid), _esc(sid), lead_html, rows))
 
 
-def build(raw, source, slug=None, generated_at=""):
+def _facts_box(facts):
+    """A box of facts only, for a document without **Key:** lines. Same markup as a
+    plan's box: nothing in it to judge, so no tick and no pencil."""
+    return ('<div class="sec" data-sec="__meta"><div class="sec-tag"></div>'
+            "<h2>At a glance</h2><table>%s</table></div>" % facts_rows(facts))
+
+
+def build(raw, source, slug=None, generated_at="", facts=None):
     """Document Markdown to the keyword arguments shell.render takes."""
     doc = parse(raw)
     used = set()
@@ -258,8 +266,12 @@ def build(raw, source, slug=None, generated_at=""):
                  "intro": doc["preamble"], "steps": []}
         rows.append({"id": intro["id"], "num": "Intro", "name": "",
                      "kind": "intro", "steps": []})
-        glance = _glance_html(intro, doc["preamble_lines"], used)
+        glance = _glance_html(intro, doc["preamble_lines"], used, facts)
+        if glance is None and facts:
+            body.append(_facts_box(facts))
         body.append(glance or _section_html(intro, used))
+    elif facts:
+        body.append(_facts_box(facts))
 
     for sec in doc["sections"]:
         body.append(_section_html(sec, used))
