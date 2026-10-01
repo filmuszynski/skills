@@ -57,10 +57,12 @@ def test_credit_line_closes_the_document():
     assert html.rfind("data-sec=", 0, end) < at, "after the last section"
     c = credit(html)
     text = htmllib.unescape(re.sub(r"<[^>]+>", "", c))
-    for part in ("/review-doc skill by Filip Muszyński", "MIT License", "v9.8.7", "GitHub", "Settings"):
+    for part in ("/review-doc skills v.9.8.7 by Filip Muszyński", "MIT License", "GitHub", "Settings"):
         assert part in text, part
     assert "Muszynski" not in text, "the name is spelled with ń"
-    assert 'href="https://github.com/filmuszynski"' in c
+    assert 'href="https://github.com/filmuszynski"' not in c, "the name is plain text, not a link"
+    assert "/review-doc skills by Filip Muszyński" in htmllib.unescape(
+        re.sub(r"<[^>]+>", "", credit(page(version=None)))), "no version, no 'v.'"
     assert 'href="%s"' % shell.LICENSE_URL in c and 'href="%s"' % shell.REPO_URL in c
     assert 'id="open-settings"' in c
     assert "—" not in c
@@ -72,7 +74,6 @@ def test_credit_links_match_plugin_json():
     with io.open(os.path.join(PLUGIN, ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
         manifest = json.load(fh)
     assert shell.REPO_URL == manifest["homepage"]
-    assert shell.AUTHOR_URL == manifest["author"]["url"]
     assert shell.LICENSE_URL == shell.REPO_URL + "/blob/main/LICENSE"
     assert os.path.isfile(os.path.join(REPO, "LICENSE"))
 
@@ -164,7 +165,7 @@ def test_settings_panel_skips_html_until_v1_1():
     rows = src.split("var KIND_ROWS = [", 1)[1].split("];", 1)[0]
     for key in ("md", "html", "plan", "choice"):
         assert 'key: "%s"' % key in rows, key
-    assert re.search(r'key: "html"[^}]*note: "arrives in v1\.1"[^}]*off: true', rows)
+    assert re.search(r'key: "html"[^}]*note: "arrives in 1\.2"[^}]*off: true', rows)
     assert "if (!k.off) update.kinds[k.key]" in fn_body(src, "openSettings"), "html is never sent"
     assert "vscode_asked" not in fn_body(src, "openSettings")
 
@@ -201,11 +202,20 @@ def test_credit_line_sits_on_the_text_column():
 
 
 @test
-def test_credit_line_sits_left():
-    """Centred in 1.0.1, back to the left in 1.0.2 (Filip, 01.10.2026)."""
+def test_credit_is_one_centred_capsule():
+    """Option D of the footer screen (Filip, 01.10.2026): four parts in one rounded
+    capsule, centred under the text column, no dot separators."""
+    c = credit(page())
+    assert c.count('class="credit-seg') == 4, c
+    assert "credit-sep" not in c and "·" not in c and "·" not in c
+    cap = c.index('class="credit-capsule"')
+    assert cap < c.index("MIT License") < c.index("GitHub") < c.index('id="open-settings"')
     rule = css().split("#doc .credit {", 1)[1].split("}", 1)[0]
-    assert "text-align" not in rule, "left, like the text above it"
-    assert "max-width: calc(57.3em / .8)" in rule, "still on the text column"
+    assert "justify-content: center" in rule and "max-width: calc(57.3em / .8)" in rule, rule
+    capr = css().split(".credit-capsule {", 1)[1].split("}", 1)[0]
+    assert "border-radius: 999px" in capr and "overflow: hidden" in capr, capr
+    seg = css().split(".credit-seg + .credit-seg {", 1)[1].split("}", 1)[0]
+    assert "border-left: 1px solid var(--line)" in seg, seg
 
 
 @test
@@ -267,7 +277,7 @@ def test_finish_overlay_markup_and_copy():
 def test_box_opens_only_after_a_successful_copy():
     body = fn_body(js(), "finish")
     assert "copyText(text, function (ok)" in body
-    assert "if (!ok || !FINISH_COPY[kind]) return;" in body
+    assert "if (!ok || !FINISH_COPY[box]) return;" in body
     ct = fn_body(js(), "copyText")
     assert ct.count("if (then) then(") >= 2, "both the clipboard and the legacy path report back"
 
@@ -317,8 +327,9 @@ def test_overlay_css_blurs_and_respects_reduced_motion():
 def test_hidden_close_button_really_hides():
     assert "#finish-close[hidden] { display: none; }" in css()
     body = fn_body(js(), "openFinish")
-    assert ("if (!finishKind) finishFrom = doc.querySelector('.verdict[data-verdict=\"' + kind + '\"]')"
-            " || doc.activeElement;") in body, "Cancel returns focus to the verdict button"
+    assert "if (!finishKind) finishFrom = doc.querySelector('.verdict[data-verdict=\"' +" in body
+    assert "(c.verdict != null ? c.verdict : kind) + '\"]') || doc.activeElement;" in body, \
+        "Cancel returns focus to the verdict button"
 
 
 @test
@@ -365,3 +376,48 @@ def test_closing_a_bubble_leaves_the_finish_box_open():
     # treated the box as open.
     cb = fn_body(js(), "closeBubble")
     assert 'doc.querySelectorAll(".is-open:not(.finish)")' in cb, cb
+
+
+@test
+def test_choice_screens_get_a_finish_box_too():
+    src = js()
+    for t in ('options: { title: "Answer copied", close: true, verdict: "", forget: true,',
+              '"Your answer has been copied. Paste it back to Claude and close this page."',
+              'explain: { title: "Questions copied", close: true, verdict: "", forget: true,',
+              '"Your questions have been copied. Paste them back to Claude and close this page."',
+              'approve: { title: "Approved", close: true, forget: true,'):
+        assert t in src, t
+    body = fn_body(src, "finish")
+    assert "var box = kind || D.meta.kind;" in body and "openFinish(box);" in body
+    of = fn_body(src, "openFinish")
+    assert "(c.verdict != null ? c.verdict : kind)" in of, "a screen's button has an empty verdict"
+    assert "if (FINISH_COPY[finishKind].forget) forgetPage();" in fn_body(src, "onFinishClose")
+    c = css()
+    assert '.finish[data-kind="options"] .fi-approve' in c and '.finish[data-kind="explain"] .fi-approve' in c
+
+
+@test
+def test_settings_open_without_selecting_the_hours():
+    body = fn_body(js(), "openSettings")
+    assert "hours.select()" not in body, "the number is not highlighted on open"
+    assert 'b.setAttribute("tabindex", "-1");' in body and "b.focus();" in body, "focus still lands in the panel"
+    assert ".settings-panel:focus { outline: none; }" in css()
+
+
+@test
+def test_credit_names_part_is_always_highlighted():
+    c = css()
+    rule = c.split(".credit-seg:first-child {", 1)[1].split("}", 1)[0]
+    assert "color: var(--link)" in rule and "background" not in rule, "the hover ink, no fill"
+    top = c.split("#doc .credit {", 1)[1].split("}", 1)[0]
+    assert "padding: 1.8em calc(1.73em / .8) 0;" in top, "twice the old .9em under the rule"
+
+
+@test
+def test_settings_wears_a_drawn_gear():
+    c = credit(page())
+    assert "&#9881;" not in c and "\u2699" not in c, "no text glyph, it renders differently per font"
+    assert '<svg class="credit-gear" viewBox="0 0 16 16" aria-hidden="true">' in c
+    rule = css().split(".credit-gear {", 1)[1].split("}", 1)[0]
+    assert "stroke: currentColor" in rule and "fill: none" in rule, rule
+    assert ".credit-settings:hover .credit-gear { transform: rotate(45deg); }" in css()

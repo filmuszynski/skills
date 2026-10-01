@@ -27,7 +27,7 @@ Route by the file's extension:
 | Extension | What to do |
 |---|---|
 | `.md`, `.markdown` | Load the `review-doc:review-md` skill and follow it |
-| `.html`, `.htm` | Say: "HTML review arrives in review-doc v1.1." |
+| `.html`, `.htm` | Say: "HTML review arrives in review-doc 1.2." |
 | anything else | Say that review-doc reviews Markdown files (`.md`, `.markdown`) |
 
 The renderer checks the same thing and refuses with exit 4 (see below), so a wrong

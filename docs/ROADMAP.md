@@ -12,7 +12,7 @@ any code; plans stay in the author's private workspace (ADR 0008).
 | 4 ✅ | Skills, commands, Python plan hook, VS Code extension renamed and hardened, first-use offer (done 01.10.2026, ADR 0013) | Local plugin install works end to end |
 | 5 ✅ | README, CHANGELOG, CONTRIBUTING, issue templates, screenshots, CI on three systems, privacy sweep, v1.0.0 release (done 01.10.2026, ADR 0014) | Repo public after Filip's go; release published |
 | 6 ✅ | Filip's switch-over from the private presenter (done 01.10.2026) | Private copy removed; CLAUDE.md, MANIFEST, memory updated |
-| later | review-html (own spec), v1.1.0 | |
+| later | review-html (own spec), 1.2 | |
 
 Phase 0 findings that change later phases: single-instance lock (2), launcher chain and
 skill-only parent entry point (4), `/reload-plugins` in the install guide and prefixed names (5).

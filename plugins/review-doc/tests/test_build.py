@@ -218,7 +218,7 @@ def test_html_files_are_refused_until_v1_1():
         code, res = _main_json(["doc", src])
         assert code == 4, (name, code)
         assert res == {"ok": False, "reason": "unsupported",
-                       "message": "HTML review arrives in review-doc v1.1."}, res
+                       "message": "HTML review arrives in review-doc 1.2."}, res
     pd = os.path.join(h, "pages")
     assert not os.path.isdir(pd) or os.listdir(pd) == []
 

@@ -71,7 +71,7 @@ def check_type(path):
     if ext in MARKDOWN:
         return
     if ext in LATER:
-        raise Unsupported("HTML review arrives in review-doc v1.1.")
+        raise Unsupported("HTML review arrives in review-doc 1.2.")
     raise Unsupported("review-doc reviews Markdown files (.md, .markdown).")
 
 

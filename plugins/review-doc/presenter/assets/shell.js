@@ -2638,13 +2638,14 @@
     updatePrompt();
     var text = buildPrompt();
     if (!text) return;
+    var box = kind || D.meta.kind;
     copyText(text, function (ok) {
-      if (!ok || !FINISH_COPY[kind]) return;
+      if (!ok || !FINISH_COPY[box]) return;
       if (kind === "changes") {
         state.data.pending = { sentAt: Date.now(), sourceMtime: D.meta.sourceMtime };
         persist();
       }
-      openFinish(kind);
+      openFinish(box);
     });
   }
 
@@ -3138,12 +3139,18 @@
 
   var IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || "");
   var FINISH_COPY = {
-    approve: { title: "Approved", close: true,
+    approve: { title: "Approved", close: true, forget: true,
                text: "Your approve prompt has been copied. Paste it back to Claude and close this page." },
     decline: { title: "Declined", close: true,
                text: "Your decline prompt has been copied. Paste it back to Claude and close this page." },
     changes: { title: "Waiting for Claude", close: false, wait: true,
-               text: "Your change request has been copied. Paste it back to Claude and wait for this page to reload." }
+               text: "Your change request has been copied. Paste it back to Claude and wait for this page to reload." },
+    /* A choice screen's one button has no verdict; the box is named after the
+       screen's kind instead, and finishes like Approved. */
+    options: { title: "Answer copied", close: true, verdict: "", forget: true,
+               text: "Your answer has been copied. Paste it back to Claude and close this page." },
+    explain: { title: "Questions copied", close: true, verdict: "", forget: true,
+               text: "Your questions have been copied. Paste them back to Claude and close this page." }
   };
   var finishKind = null, finishFrom = null, closeTimer = null;
 
@@ -3157,7 +3164,8 @@
     hideTip();
     /* The copy may have run through the async clipboard, so activeElement is
        not reliably the button that was pressed. Name it instead. */
-    if (!finishKind) finishFrom = doc.querySelector('.verdict[data-verdict="' + kind + '"]') || doc.activeElement;
+    if (!finishKind) finishFrom = doc.querySelector('.verdict[data-verdict="' +
+                                    (c.verdict != null ? c.verdict : kind) + '"]') || doc.activeElement;
     finishKind = kind;
     root.querySelector(".finish-title-text").textContent = c.title;
     finishEl("finish-text").textContent = c.text;
@@ -3239,7 +3247,7 @@
   function onFinishClose() {
     if (!closeArmed()) { armClose(); return; }
     disarmClose();
-    if (finishKind === "approve") forgetPage();
+    if (FINISH_COPY[finishKind].forget) forgetPage();
     window.close();
     setTimeout(function () {
       if (!finishKind) return;
@@ -3289,7 +3297,7 @@
      button gets no mouse events and its tooltip would never show. */
   var KIND_ROWS = [
     { key: "md", label: "Markdown documents" },
-    { key: "html", label: "HTML documents", note: "arrives in v1.1", off: true },
+    { key: "html", label: "HTML documents", note: "arrives in 1.2", off: true },
     { key: "plan", label: "Plans" },
     { key: "choice", label: "Options and explainer screens" }
   ];
@@ -3326,6 +3334,9 @@
       b.classList.add("settings-panel");
       b.setAttribute("role", "dialog");
       b.setAttribute("aria-label", "Review page settings");
+      /* Focus goes to the panel, not into the number, so nothing opens
+         highlighted; Tab reaches the hours next. */
+      b.setAttribute("tabindex", "-1");
       b.appendChild(mkEl("p", "bubble-head", "Settings"));
 
       var hours = doc.createElement("input");
@@ -3415,7 +3426,7 @@
         if (ev.key === "Enter") { ev.preventDefault(); commit(); }
       });
       checkAge();
-      setTimeout(function () { hours.focus(); hours.select(); }, 0);
+      setTimeout(function () { b.focus(); }, 0);
     });
   }
 

@@ -79,7 +79,7 @@ def test_skills_find_the_renderer_from_their_base_directory():
 @test
 def test_parent_skill_routes_and_handles_every_outcome():
     _, body = front("skills", "review-doc", "SKILL.md")
-    for needle in ("review-doc:review-md", ".markdown", ".html", "v1.1",
+    for needle in ("review-doc:review-md", ".markdown", ".html", "review-doc 1.2",
                    "exit 3", "exit 4", "/review-doc:settings set", "offerExtension",
                    "extension.py\" install", "extension.py\" decline",
                    "approved", "revise and re-present", "declined", "CHOSEN:"):

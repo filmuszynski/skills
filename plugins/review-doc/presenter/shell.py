@@ -39,8 +39,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ASSETS = os.path.join(HERE, "assets")
 
 # The credit line's links. test_credit_links_match_plugin_json keeps them equal to
-# the manifest's homepage and author.
-AUTHOR_URL = "https://github.com/filmuszynski"
+# the manifest's homepage.
 REPO_URL = "https://github.com/filmuszynski/skills"
 LICENSE_URL = REPO_URL + "/blob/main/LICENSE"
 
@@ -170,25 +169,27 @@ def _json_literal(payload):
 
 
 def _credit_html(version):
-    """The last line of every page: who made it, the license, the version, the repo,
-    and the way into the settings.
+    """The last line of every page: one capsule of four parts, centred. Who made it
+    and which version, the license, the repo, and the way into the settings.
 
     It is chrome, not document: no data-edit-id, no section, so it can never be
-    rewritten, and the page ignores a selection that touches it. The settings button
-    and its separator sit in .credit-tail, which print hides.
+    rewritten, and the page ignores a selection that touches it. The settings part
+    carries .credit-tail, which print hides.
     """
-    sep = '<span class="credit-sep" aria-hidden="true">·</span>'
-    link = '<a href="{0}" target="_blank" rel="noopener">{1}</a>'
-    parts = ["/review-doc skill by " + link.format(AUTHOR_URL, "Filip Muszyński"),
-             link.format(LICENSE_URL, "MIT License")]
-    if version:
-        parts.append('<span class="credit-version">v%s</span>' % _esc(version))
-    parts.append(link.format(REPO_URL, "GitHub&nbsp;&#8599;"))
-    tail = ('<span class="credit-tail">' + sep +
-            '<button type="button" class="credit-settings" id="open-settings" '
-            'aria-haspopup="dialog" data-tip="Settings for every review page">'
-            '<span aria-hidden="true">&#9881;</span> Settings</button></span>')
-    return '<div class="credit">' + sep.join(parts) + tail + "</div>"
+    link = '<a class="credit-seg" href="{0}" target="_blank" rel="noopener">{1}</a>'
+    ver = (' <span class="credit-version">v.%s</span>' % _esc(version)) if version else ""
+    parts = ['<span class="credit-seg">/review-doc skills' + ver + " by Filip Muszyński</span>",
+             link.format(LICENSE_URL, "MIT License"),
+             link.format(REPO_URL, "GitHub&nbsp;&#8599;"),
+             '<button type="button" class="credit-seg credit-settings credit-tail" id="open-settings" '
+             'aria-haspopup="dialog" data-tip="Settings for every review page">'
+             '<svg class="credit-gear" viewBox="0 0 16 16" aria-hidden="true">'
+             '<path d="M12.82 6.05L14.77 6.68L14.77 9.32L12.82 9.95L12.79 10.03L13.72 11.86L11.86 13.72'
+             'L10.03 12.79L9.95 12.82L9.32 14.77L6.68 14.77L6.05 12.82L5.97 12.79L4.14 13.72L2.28 11.86'
+             'L3.21 10.03L3.18 9.95L1.23 9.32L1.23 6.68L3.18 6.05L3.21 5.97L2.28 4.14L4.14 2.28L5.97 3.21'
+             'L6.05 3.18L6.68 1.23L9.32 1.23L9.95 3.18L10.03 3.21L11.86 2.28L13.72 4.14L12.79 5.97Z"/>'
+             '<circle cx="8" cy="8" r="2.2"/></svg> Settings</button>']
+    return '<div class="credit"><span class="credit-capsule">' + "".join(parts) + "</span></div>"
 
 
 PENCIL = "✎"

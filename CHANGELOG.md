@@ -6,6 +6,21 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-10-01
+
+### Changed
+- The credit line under the document is one centred capsule in four parts:
+  "/review-doc skills v.<version> by Filip Muszyński", MIT License, GitHub and Settings.
+  The credit part is always in the link colour, and the capsule sits twice as far below the rule.
+  The name is no longer a link.
+- The settings panel opens without the hours number selected.
+- The Settings button draws its gear instead of using the ⚙ character.
+- HTML review is now announced for 1.2 (settings panel, skill and the message for `.html` files).
+
+### Added
+- Choice screens open a box too after Copy answer or Copy questions, like Approved:
+  "Answer copied" or "Questions copied", Close page, Cancel and Copy prompt again.
+
 ## [1.1.1] - 2026-10-01
 
 ### Changed

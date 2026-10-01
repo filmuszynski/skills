@@ -91,4 +91,4 @@ def test_footer_shows_the_plugin_version():
     res = build_screen.build("doc", src, out_dir=h)
     with io.open(os.path.join(h, res["slug"] + ".html"), encoding="utf-8") as fh:
         html = fh.read()
-    assert '<span class="credit-version">v%s</span>' % paths.version() in html
+    assert '<span class="credit-version">v.%s</span>' % paths.version() in html
