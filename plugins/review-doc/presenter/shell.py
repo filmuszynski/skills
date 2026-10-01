@@ -4,7 +4,7 @@
 A layout produces five things and knows nothing about any of the above:
 
     shell.render(title, body_html, sections, prompt_spec, meta,
-                 actions=None, select=None, general_placeholder=None) -> str
+                 actions=None, select=None, general_placeholder=None, scripts=None) -> str
 
     title         str   shown in the header and the browser tab
     body_html     str   the document itself, honouring the markup contract in shell.js
@@ -22,6 +22,8 @@ A layout produces five things and knows nothing about any of the above:
                         offers one Send answer, because choosing IS the answer.
     select        str   'one' or 'many' for an options screen, else None
     general_placeholder str  what the free-text box invites
+    scripts       list  extra asset names, each run in its own <script> block after
+                        shell.js; only HTML pages have one (shell_html.js)
 
 The result is one self-contained file: no external script, stylesheet or font.
 """
@@ -291,7 +293,7 @@ PILL_KIND = {"doc": "md", "html": "html", "plan": "plan",
 
 
 def render(title, body_html, sections, prompt_spec, meta,
-           actions=None, select=None, general_placeholder=None):
+           actions=None, select=None, general_placeholder=None, scripts=None):
     # None means "not supplied, use the default". An empty list means "this kind
     # has no verdict", which is not the same thing and must not fall back.
     actions = PLAN_ACTIONS if actions is None else list(actions)
@@ -314,7 +316,11 @@ def render(title, body_html, sections, prompt_spec, meta,
     out = out.replace("__CREDIT__", _credit_html(meta.get("version")))
     out = out.replace("__CSS__", _asset("shell.css"))
     out = out.replace("__DATA__", _json_literal(data))
-    out = out.replace("__JS__", _asset("shell.js"))
+    js = _asset("shell.js")
+    # Each in its own block, so an error in one cannot stop the next.
+    for name in scripts or ():
+        js += "\n</script>\n<script>\n" + _asset(name)
+    out = out.replace("__JS__", js)
     out = out.replace("__BODY__", body_html)
     out = out.replace("__ACTIONS__", _actions_html(actions))
     out = out.replace("__GENERAL__", _esc(general_placeholder or "A note on the whole plan, optional"))
