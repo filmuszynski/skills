@@ -21,7 +21,8 @@ def test_health_and_server_json():
     with serving(h, version="9.9.9") as srv:
         status, ctype, data = request(srv, "GET", "/api/health")
         assert status == 200 and ctype.startswith("application/json")
-        assert body(data) == {"ok": True, "version": "9.9.9", "port": srv.port, "pid": os.getpid()}
+        assert body(data) == {"ok": True, "version": "9.9.9", "port": srv.port, "pid": os.getpid(),
+                              "framePort": srv.port + 100}
         info = json.load(io.open(srv.info_path, encoding="utf-8"))
         assert info["port"] == srv.port and info["pid"] == os.getpid()
         datetime.datetime.fromisoformat(info["started"])

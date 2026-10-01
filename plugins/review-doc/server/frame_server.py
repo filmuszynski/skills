@@ -13,9 +13,12 @@ the sockets.
 from __future__ import print_function
 
 import html as _html
+import http.server
 import os
 import re
-from urllib.parse import unquote
+import time
+import traceback
+from urllib.parse import unquote, urlsplit
 
 import pages
 
@@ -232,3 +235,82 @@ def parse_range(header, size):
     if start >= size or end < start:
         return "bad"
     return (start, min(end, size - 1))
+
+
+# ------------------------------------------------------------------ the handler
+
+class FrameHandler(http.server.BaseHTTPRequestHandler):
+    """One request to <slug>.localhost:<frame port>. Read-only: GET and HEAD."""
+    server_version = "review-doc"
+
+    def log_message(self, fmt, *args):
+        pass  # requests are not logged; errors go to server.log through app.log
+
+    @property
+    def app(self):
+        return self.server.app
+
+    def _plain(self, code, text, headers=()):
+        data = text.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in headers:
+            self.send_header(k, v)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _slug(self):
+        """The review this request is for, from its Host header, or None."""
+        host = (self.headers.get("Host") or "").strip().lower()
+        tail = ".localhost:%d" % self.app.frame_port
+        if not host.endswith(tail):
+            return None
+        slug = host[:-len(tail)]
+        return slug if pages.HTML_SLUG_RE.match(slug) else None
+
+    def do_GET(self):
+        self._serve()
+
+    def do_HEAD(self):
+        self._serve()
+
+    def _not_allowed(self):
+        # Read the body first: on Windows, closing with unread bytes sends a reset
+        # and the client never sees the answer.
+        try:
+            left = min(int(self.headers.get("Content-Length") or 0), 1 << 20)
+        except ValueError:
+            left = 0
+        while left > 0:
+            chunk = self.rfile.read(min(left, 65536))
+            if not chunk:
+                break
+            left -= len(chunk)
+        self.close_connection = True
+        self._plain(405, "Method not allowed: the review frame is read-only.\n", [("Allow", "GET, HEAD")])
+
+    do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _not_allowed
+
+    def _serve(self):
+        self.app.last_request = time.time()
+        slug = self._slug()
+        target = self.app.frame_target(slug) if slug else None
+        if target is None:
+            return self._plain(403, "Forbidden: no HTML review answers to this name.\n")
+        path = urlsplit(self.path).path or "/"
+        try:
+            return self._file_mode(slug, target, path)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return None  # the browser went away mid-file (a video seek, a reload)
+        except Exception:  # noqa: BLE001
+            self.app.log("frame %s %s failed: %s"
+                         % (slug, path, traceback.format_exc().strip().splitlines()[-1]))
+            return self._plain(500, "Internal error; see server.log in the review-doc folder.\n")
+
+    def _file_mode(self, slug, target, path):
+        # Task 3 serves the folder; until then nothing is.
+        return self._plain(404, "Not found.\n")

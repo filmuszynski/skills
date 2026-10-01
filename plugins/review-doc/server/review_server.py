@@ -15,6 +15,7 @@ import io
 import json
 import os
 import re
+import socket
 import socketserver
 import subprocess
 import sys
@@ -29,6 +30,7 @@ PRESENTER = os.path.join(os.path.dirname(HERE), "presenter")
 sys.path.insert(0, PRESENTER)
 
 import drafts  # noqa: E402
+import frame_server  # noqa: E402
 import pages  # noqa: E402
 import paths  # noqa: E402
 import settings  # noqa: E402
@@ -39,6 +41,7 @@ PRUNE_SECONDS = 3600
 LOCK_WAIT = 2.0
 MAX_BODY = 64 * 1024
 MAX_LOG = 1000 * 1000
+MAX_SERVED = 2000  # files remembered per HTML review, for the stale check
 BUILD_SCREEN = os.path.join(PRESENTER, "build_screen.py")
 SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # meta.kind -> the build_screen subcommand that renders it
@@ -157,6 +160,11 @@ class _HTTPServer(http.server.ThreadingHTTPServer):
             self.app.log("request error: %s" % traceback.format_exc().strip().splitlines()[-1])
 
 
+class _HTTPServer6(_HTTPServer):
+    # macOS and Linux resolve localhost names to ::1 first (Phase 0).
+    address_family = socket.AF_INET6
+
+
 class ReviewServer(object):
     def __init__(self, home=None, ports=None, idle_seconds=IDLE_SECONDS,
                  prune_seconds=PRUNE_SECONDS, tick=60.0, lock_wait=LOCK_WAIT, version=None):
@@ -175,6 +183,11 @@ class ReviewServer(object):
         self._lock = Lock(os.path.join(self.home, "server.lock"))
         self._guard = threading.Lock()
         self._rebuilding = {}
+        self.frame_port = None
+        self.frames = []
+        self._frame_threads = []
+        self._served = {}      # slug -> {file path: mtime ms when first served} (1.2)
+        self._meta_cache = {}  # slug -> (page mtime, meta)
 
     @property
     def info_path(self):
@@ -199,27 +212,60 @@ class ReviewServer(object):
         if not self._lock.acquire(self.lock_wait):
             self.log("another server holds %s; exiting" % self._lock.path)
             return 1
-        for port in self.ports:
-            try:
-                httpd = _HTTPServer(("127.0.0.1", port), Handler)
-            except OSError:
-                continue
-            httpd.app = self
-            self.httpd, self.port = httpd, httpd.server_address[1]
-            break
+        for port in self._candidates():
+            if self._bind(port):
+                break
         if self.httpd is None:
             span = "%d-%d" % (min(self.ports), max(self.ports)) if self.ports else "(none)"
             self.log("no free port in %s; exiting" % span)
             self._lock.release()
             return 2
-        _write_json(self.info_path, {"port": self.port, "pid": os.getpid(), "started": _now_iso()})
-        self.log("serving on 127.0.0.1:%d, version %s, pid %d" % (self.port, self.version, os.getpid()))
+        _write_json(self.info_path, {"port": self.port, "pid": os.getpid(), "started": _now_iso(),
+                                     "framePort": self.frame_port})
+        self.log("serving on 127.0.0.1:%d, frames on %d, version %s, pid %d"
+                 % (self.port, self.frame_port, self.version, os.getpid()))
         self._prune()
         return 0
+
+    def _candidates(self):
+        # Port 0 asks the OS for any free port; its + 100 may be taken, so ask again.
+        for port in self.ports:
+            for _ in range(20 if port == 0 else 1):
+                yield port
+
+    def _bind(self, port):
+        """The main listener on port and the frame listener on port + 100, both or
+        neither, so a page can always work out the frame port from its own."""
+        try:
+            httpd = _HTTPServer(("127.0.0.1", port), Handler)
+        except OSError:
+            return False
+        fport = httpd.server_address[1] + frame_server.FRAME_OFFSET
+        try:
+            if fport > 65535:
+                raise OSError("no frame port above %d" % httpd.server_address[1])
+            frames = [_HTTPServer(("127.0.0.1", fport), frame_server.FrameHandler)]
+        except OSError:
+            httpd.server_close()
+            return False
+        if socket.has_ipv6:
+            try:
+                frames.append(_HTTPServer6(("::1", fport), frame_server.FrameHandler))
+            except OSError:
+                pass  # no IPv6 loopback here; every browser reached 127.0.0.1 in Phase 0
+        for s in [httpd] + frames:
+            s.app = self
+        self.httpd, self.port = httpd, httpd.server_address[1]
+        self.frames, self.frame_port = frames, fport
+        return True
 
     def serve(self):
         worker = threading.Thread(target=self._housekeeping, daemon=True)
         worker.start()
+        for f in self.frames:
+            t = threading.Thread(target=f.serve_forever, kwargs={"poll_interval": 0.2}, daemon=True)
+            t.start()
+            self._frame_threads.append(t)
         try:
             self.httpd.serve_forever(poll_interval=0.2)
         finally:
@@ -243,6 +289,10 @@ class ReviewServer(object):
                 pass
         if self.httpd is not None:
             self.httpd.server_close()
+        for f in self.frames:
+            if self._frame_threads:
+                f.shutdown()  # waits for that loop to end; never called before serve() started it
+            f.server_close()
         self._lock.release()
         self.log("stopped")
 
@@ -273,6 +323,33 @@ class ReviewServer(object):
         folder = os.path.realpath(paths.pages_dir(self.home))
         path = os.path.join(folder, slug + ".html")
         return path if os.path.dirname(os.path.realpath(path)) == folder else None
+
+    def frame_target(self, slug):
+        """{root, entry} of the HTML review called slug, in file mode, or None.
+        The page's meta is cached by the page's mtime; a rebuilt page also starts
+        its served-files record again, because the frame reloads every file."""
+        if not pages.HTML_SLUG_RE.match(slug or ""):
+            return None
+        path = self.page_path(slug)
+        try:
+            mtime = os.path.getmtime(path) if path else None
+        except OSError:
+            mtime = None
+        if mtime is None:
+            return None
+        with self._guard:
+            hit = self._meta_cache.get(slug)
+            if hit and hit[0] == mtime:
+                meta = hit[1]
+            else:
+                meta = None
+                if hit:
+                    self._served.pop(slug, None)
+        if meta is None:
+            meta = pages.read_meta(path)
+            with self._guard:
+                self._meta_cache[slug] = (mtime, meta)
+        return frame_server.file_target(meta)
 
     def freshen(self, slug, path):
         """Rebuild the page first if its source is newer than the page says.
@@ -374,7 +451,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if u.path == "/api/health":
                 return self._json(200, {"ok": True, "version": self.app.version,
-                                        "port": self.app.port, "pid": os.getpid()})
+                                        "port": self.app.port, "pid": os.getpid(),
+                                        "framePort": self.app.frame_port})
             if u.path == "/api/settings":
                 return self._json(200, settings.load(self.app.home))
             if u.path == "/api/review-source":

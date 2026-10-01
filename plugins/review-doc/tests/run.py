@@ -1932,7 +1932,7 @@ def test_fact_rows_are_chrome_for_selection():
 
 
 NEW_TEST_MODULES = ["test_privacy", "test_vendor", "test_settings", "test_build", "test_version", "test_write",
-                    "test_server", "test_pages_route", "test_housekeeping", "test_launch", "test_opening", "test_review_fixes", "test_page", "test_opener", "test_extension", "test_hook", "test_plugin_files", "test_repo_files", "test_docs", "test_drafts", "test_frame_unit"]
+                    "test_server", "test_pages_route", "test_housekeeping", "test_launch", "test_opening", "test_review_fixes", "test_page", "test_opener", "test_extension", "test_hook", "test_plugin_files", "test_repo_files", "test_docs", "test_drafts", "test_frame_unit", "test_frame_server"]
 
 
 @test

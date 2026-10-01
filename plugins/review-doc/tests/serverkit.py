@@ -50,3 +50,16 @@ def post_json(srv, path, obj, origin=True, headers=None):
     h.update(headers or {})
     body = obj if isinstance(obj, (str, bytes)) else json.dumps(obj)
     return request(srv, "POST", path, body=body, headers=h)
+
+
+def frame_request(srv, method, path, slug=None, host=None, headers=None, address="127.0.0.1"):
+    """A request to the frame listener. Host defaults to <slug>.localhost:<frame port>."""
+    conn = http.client.HTTPConnection(address, srv.frame_port, timeout=15)
+    h = {"Host": host if host is not None else "%s.localhost:%d" % (slug, srv.frame_port)}
+    h.update(headers or {})
+    conn.request(method, path, headers=h)
+    r = conn.getresponse()
+    data = r.read()
+    out = (r.status, dict((k.lower(), v) for k, v in r.getheaders()), data)
+    conn.close()
+    return out
