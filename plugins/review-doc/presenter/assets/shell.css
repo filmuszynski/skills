@@ -172,18 +172,18 @@ header > .doc-title { flex-shrink: 1; }
 /* The scope toggle: three icons in one box, only the current one opaque, so a
    click cross-fades instead of swapping. It fades in the first time a page has
    an earlier round. */
-#cycle-scope { position: relative; width: 30px; padding: 0; display: inline-grid; place-items: center;
-               animation: scope-in .2s ease; }
+#cycle-scope { position: relative; width: 30px; padding: 0; display: inline-grid; place-items: center; }
+#cycle-scope.is-new { animation: scope-in .2s ease; }
 #cycle-scope[hidden] { display: none; }
 #cycle-scope .ico { grid-area: 1 / 1; width: 14px; height: 14px; fill: none; stroke: currentColor;
                     stroke-width: 1.5; opacity: 0; transition: opacity .18s ease; }
 #cycle-scope[data-scope="current"] .sc-current,
 #cycle-scope[data-scope="previous"] .sc-previous,
 #cycle-scope[data-scope="all"] .sc-all { opacity: 1; }
-#cycle-scope[data-scope="current"] .sc-current circle { fill: currentColor; }
+#cycle-scope .sc-current circle { fill: currentColor; }
 @keyframes scope-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  #cycle-scope { animation: none; }
+  #cycle-scope.is-new { animation: none; }
   #cycle-scope .ico { transition: none; }
 }
 

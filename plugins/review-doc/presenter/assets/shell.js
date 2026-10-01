@@ -202,6 +202,8 @@
     all: "Stepping through every round"
   };
 
+  var freshRound = false;
+
   function nextScope(s) {
     var i = SCOPES.indexOf(s);
     return SCOPES[(i + 1) % SCOPES.length] || "current";
@@ -220,6 +222,17 @@
     return !!(el.closest && el.closest("[data-prev]"));
   }
 
+  /* "cur" for this round, "r<i>" for an earlier one (the prefix of data-prev). */
+  function roundOf(el) {
+    if (!isEarlier(el)) return "cur";
+    var k = el.getAttribute("data-prev");
+    if (k === null && el.closest) {
+      var a = el.closest("[data-prev]");
+      k = a ? a.getAttribute("data-prev") : "";
+    }
+    return String(k).split(":")[0];
+  }
+
   function inScope(el) {
     var s = scopeNow();
     return s === "all" || (s === "previous") === isEarlier(el);
@@ -229,7 +242,16 @@
     var b = doc.getElementById("cycle-scope");
     if (!b) return;
     var s = scopeNow();
+    var wasHidden = b.hidden;
     b.hidden = !hasRounds();
+    /* The fade is only for the first time this page gets an earlier round. */
+    if (wasHidden && !b.hidden && freshRound) {
+      freshRound = false;
+      b.classList.add("is-new");
+      var done = function () { b.classList.remove("is-new"); };
+      b.addEventListener("animationend", done);
+      setTimeout(done, 600);
+    }
     b.setAttribute("data-scope", s);
     b.setAttribute("data-tip", SCOPE_TIPS[s]);
     b.setAttribute("aria-label", SCOPE_TIPS[s] + ", click to change");
@@ -238,7 +260,6 @@
   function onScope() {
     state.ui.scope = nextScope(scopeNow());
     navAt = { comments: -1, edits: -1, all: -1 };
-    paintScope();
     persist();
     updateCounters();
     flash(SCOPE_TIPS[state.ui.scope], "", 1800);
@@ -2320,7 +2341,11 @@
          returns document order, so the cycle reads top to bottom. */
       return [].slice.call(docEl.querySelectorAll(
         "mark.edited, .chg-whole, table[data-tchg], mark.tbl-orphan, mark.prev-edit, mark.prev-pill:not([data-label='comment'])"
-      )).filter(inScope).filter(function (el) { return !cellLocked(el.closest("td, th")); });
+      )).filter(inScope).filter(function (el) {
+        /* One earlier rewrite across bold and plain is several pieces under one
+           key and is one stop. Current runs are each their own stop. */
+        return !el.hasAttribute("data-prev") || firstPiece(el);
+      }).filter(function (el) { return !cellLocked(el.closest("td, th")); });
     }
     /* Everything with a place in the document, in document order. The note on
        the whole plan is counted but has nowhere to jump to. */
@@ -2332,10 +2357,11 @@
       return !cellLocked(el.closest ? el.closest("td, th") : null);
     }).filter(function (el, i, all) {
       /* A decided section already contains its decided steps and marks; keep
-         the outermost one so one click is one stop. Only within one round: an
-         earlier mark around a current one does not hide it. */
+         the outermost one so one click is one stop. Only within one round (both
+         current, or both earlier with the same r<i>: prefix): a mark of another
+         round around it does not hide it. */
       for (var j = 0; j < all.length; j++) {
-        if (all[j] !== el && all[j].contains(el) && isEarlier(all[j]) === isEarlier(el)) return false;
+        if (all[j] !== el && all[j].contains(el) && roundOf(all[j]) === roundOf(el)) return false;
       }
       return true;
     });
@@ -2436,15 +2462,20 @@
       edits: totalEditRuns() + tableChangeCount(),
       all: feedbackCount()
     };
+    var lists = {
+      comments: navTargets("comments"), edits: navTargets("edits"), all: navTargets("all")
+    };
     if (scopeNow() !== "current") {
-      /* The same lists the clicks walk, so a number is never more than the
-         stops behind it. Every round adds the current round's whole count,
-         because feedback without a place in the page still belongs to it. */
-      counts.comments = navTargets("comments").length;
-      counts.edits = navTargets("edits").length;
+      /* Comments and edits count the same lists the clicks walk. The all
+         counter is wider, as in 1.0.3: it also counts items with no place in
+         the page (a note on the whole plan, answers), so it can exceed its
+         stops. In every-round scope it adds the earlier stops to the current
+         round's whole count. */
+      counts.comments = lists.comments.length;
+      counts.edits = lists.edits.length;
       counts.all = scopeNow() === "all"
-        ? feedbackCount() + navTargets("all").filter(isEarlier).length
-        : navTargets("all").length;
+        ? feedbackCount() + lists.all.filter(isEarlier).length
+        : lists.all.length;
     }
     var btns = doc.querySelectorAll(".counter");
     for (var i = 0; i < btns.length; i++) {
@@ -2456,7 +2487,7 @@
          and the aria-label. */
       var num = btns[i].querySelector(".num");
       if (num) num.textContent = String(n);
-      btns[i].disabled = !navTargets(kind).length;
+      btns[i].disabled = !lists[kind].length;
       btns[i].setAttribute("data-tip",
         label + (btns[i].disabled ? "" : " \u00B7 click to step through them"));
       btns[i].setAttribute("aria-label",
@@ -3089,7 +3120,7 @@
     collectTables();
     expireOld(hoursMs(staleHours));
     load();
-    if (promoteRound(state.data, D.meta.sourceMtime)) persist();
+    if (promoteRound(state.data, D.meta.sourceMtime)) { freshRound = true; persist(); }
     baseline = JSON.stringify(state.data);
     applyDataToDoc();
     setMode(state.mode);

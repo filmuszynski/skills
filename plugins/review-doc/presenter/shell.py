@@ -60,7 +60,7 @@ __CSS__
   <span class="doc-title">__SHORT__</span>
   <div class="spacer"></div>
   <div class="controls-slot"><div class="controls">
-  <button class="iconbtn scope-btn" id="cycle-scope" type="button" hidden data-scope="current"
+  <button class="iconbtn" id="cycle-scope" type="button" hidden data-scope="current"
           data-tip="Stepping through this round" aria-label="Stepping through this round, click to change">
     <svg class="ico sc-current" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/></svg>
     <svg class="ico sc-previous" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/><circle cx="8" cy="8" r="5.6"/></svg>

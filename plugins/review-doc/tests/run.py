@@ -2058,6 +2058,22 @@ def test_pulse_lights_every_piece_of_one_earlier_comment():
     assert 'getAttribute("data-prev")' in nt, "firstPiece dedupes earlier pieces by data-prev"
 
 
+@test
+def test_one_earlier_edit_in_two_pieces_is_one_stop():
+    pre = (SCOPE_PRELUDE + "var scope = 'previous'; function scopeNow() { return scope; }"
+           "function cellLocked() { return false; }"
+           "function mk(prev, key) { return {hasAttribute: function (a) { return a === 'data-prev' && prev; },"
+           " getAttribute: function (a) { return a === 'data-prev' && prev ? key : null; },"
+           " matches: function () { return !prev; }, closest: function () { return null; },"
+           " contains: function () { return false; }}; }"
+           "var els = [mk(true, 'r0:e1:0'), mk(true, 'r0:e1:0'), mk(true, 'r0:e2:0'), mk(false, '')];"
+           "var docEl = {querySelectorAll: function () { return els; }};")
+    out = run_js(["isEarlier", "inScope", "navTargets"],
+                 "[navTargets('edits').length, (scope = 'all', navTargets('edits').length),"
+                 " (scope = 'current', navTargets('edits').length)]", pre)
+    assert out == [2, 3, 1], out
+
+
 def main():
     for mod in NEW_TEST_MODULES:
         __import__(mod)
