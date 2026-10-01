@@ -45,24 +45,38 @@ def read(path, tail_only):
         return fh.read(n).decode("utf-8", "replace")
 
 
+def is_compaction(entry):
+    return entry.get("subtype") == "compact_boundary" or entry.get("isCompactSummary") is True
+
+
 def last_used_tokens(text):
+    """(tokens, compacted) for the newest main-thread usage entry. A compaction newer
+    than that entry gives (0, True): the old figure no longer describes the window."""
     for raw in reversed(text.split("\n")):
-        if '"usage"' not in raw:
+        has_usage = '"usage"' in raw
+        if not has_usage and "compact" not in raw.lower():
             continue
         try:
             entry = json.loads(raw)
         except ValueError:
             continue
-        if not isinstance(entry, dict) or entry.get("isSidechain") or entry.get("isApiErrorMessage"):
+        if not isinstance(entry, dict):
+            continue
+        if is_compaction(entry):
+            return 0, True
+        if not has_usage or entry.get("isSidechain") or entry.get("isApiErrorMessage"):
             continue
         msg = entry.get("message")
         usage = msg.get("usage") if isinstance(msg, dict) else None
         if not isinstance(usage, dict):
             continue
-        total = sum(int(usage.get(k) or 0) for k in USAGE_KEYS)
+        try:
+            total = sum(int(usage.get(k) or 0) for k in USAGE_KEYS)
+        except (TypeError, ValueError):
+            continue
         if total > 0:
-            return total
-    return 0
+            return total, False
+    return 0, False
 
 
 def window_from_model(text):
@@ -98,13 +112,21 @@ def load_state(path):
             state = json.load(fh)
     except (OSError, ValueError):
         return {}
-    if isinstance(state, list):  # format before 30.09.2026
+    if isinstance(state, list):  # earliest format: just the fired levels
         state = {"fired": state}
     if not isinstance(state, dict):
         return {}
     fired = state.get("fired")
     state["fired"] = [p for p in fired if isinstance(p, (int, float))] if isinstance(fired, list) else []
     return state
+
+
+def save_state(path, state):
+    # Write then rename, so a parallel hook never reads a half-written file.
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(state, fh)
+    os.replace(tmp, path)
 
 
 def env_window():
@@ -130,7 +152,11 @@ def main(raw):
     state = load_state(state_file)
 
     tail = read(transcript, True)
-    used = last_used_tokens(tail)
+    used, compacted = last_used_tokens(tail)
+    if compacted:  # stay quiet until the next response; all levels may fire again
+        state["fired"] = []
+        save_state(state_file, state)
+        return None
     if not used:
         return None
 
@@ -146,8 +172,7 @@ def main(raw):
     pct = used * 100.0 / win
 
     hit, note, state["fired"] = decide(pct, state.get("fired", []), event)
-    with open(state_file, "w", encoding="utf-8") as fh:
-        json.dump(state, fh)
+    save_state(state_file, state)
     if hit is None:
         return None
 

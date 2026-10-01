@@ -17,4 +17,6 @@ First public release.
 - Claude gets a short note once per level, so the reminder does not fill the window.
 - The window size (200k or 1M) is read from the session's transcript and follows
   `/model` switches. `CLAUDE_CONTEXT_WINDOW` overrides it.
-- After `/compact`, levels above the new usage can fire again.
+- After `/compact` the line pauses until the next reply reports the new usage, and all
+  levels can fire again.
+- Parallel tool calls cannot corrupt the state: it is written to a temp file and renamed.

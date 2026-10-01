@@ -288,6 +288,52 @@ def test_corrupt_state_is_ignored():
 
 
 @test
+def test_quiet_right_after_compact_until_fresh_usage():
+    b = Box()
+    b.model()
+    b.usage(550000)
+    b.run()
+    b.add({"type": "system", "subtype": "compact_boundary", "content": "Conversation compacted"})
+    b.add({"type": "user", "isCompactSummary": True, "message": {"role": "user", "content": "summary"}})
+    assert b.run() is None, "pre-compact usage must not be shown as current"
+    b.usage(350000)
+    out = b.run()
+    assert "\U0001F7E1 Context at 35%" in line(out) and has_note(out)
+
+
+@test
+def test_bad_usage_value_skips_that_entry():
+    b = Box()
+    b.model()
+    b.usage(350000)
+    b.add({"type": "assistant", "message": {"usage": {"input_tokens": "lots"}}})
+    assert "Context at 35%" in line(b.run())
+
+
+@test
+def test_model_found_outside_a_large_tail():
+    b = Box()
+    b.model()
+    filler = json.dumps({"type": "user", "message": {"content": "x" * 1000}})
+    with io.open(b.transcript, "a", encoding="utf-8") as fh:
+        fh.write((filler + "\n") * 2600)  # about 2.6 MB, past the 2 MB tail
+    b.usage(350000)
+    assert "of 1000k" in line(b.run())
+    names = os.listdir(b.state_dir())
+    with io.open(os.path.join(b.state_dir(), names[0]), encoding="utf-8") as fh:
+        assert json.load(fh)["window"] == 1000000, "window cached after one full scan"
+
+
+@test
+def test_no_temp_file_left_behind():
+    b = Box()
+    b.model()
+    b.usage(350000)
+    b.run()
+    assert os.listdir(b.state_dir()) == ["s1.json"], os.listdir(b.state_dir())
+
+
+@test
 def test_output_is_ascii_only():
     b = Box()
     b.model()

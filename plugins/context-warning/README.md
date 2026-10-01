@@ -16,8 +16,8 @@ From 30%, the line for the current level shows on every prompt you send, for exa
 
 During tool calls it appears only when a new level is crossed, so a long run still
 warns you without repeating on every step. Claude is told once per level, so the
-reminder does not use up the context it warns about. After `/compact` the levels
-reset to the new usage.
+reminder does not use up the context it warns about. Right after `/compact` it stays
+quiet until Claude's next reply reports the new usage, and all levels can fire again.
 
 ## Install
 
@@ -41,6 +41,9 @@ environment Claude Code starts from.
 
 - **No line at all:** check that `python3 --version` or `python --version` prints 3.10
   or later in the shell Claude Code uses. The hook stays silent on any error, by design.
+- **"Hook error" on every prompt:** neither `python3` nor `python` runs in that shell.
+  Install Python 3.10+ or put it on the PATH. On macOS without the Command Line Tools,
+  `/usr/bin/python3` may ask to install them each time; install them once.
 - **Two lines per prompt:** an older copy of the hook is still wired up in your own
   `settings.json`. Remove that entry.
 
