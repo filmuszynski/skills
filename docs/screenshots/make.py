@@ -34,6 +34,10 @@ def main():
     shutil.rmtree(WORK, ignore_errors=True)
     demo = os.path.join(WORK, "demo")
     shutil.copytree(os.path.join(HERE, "demo"), demo)
+    # Fresh mtimes: Last edited must not read earlier than Created in the README images.
+    for root, _dirs, files in os.walk(demo):
+        for name in files:
+            os.utime(os.path.join(root, name), None)
     env = dict(os.environ, REVIEW_DOC_HOME=os.path.join(WORK, "home"),
                REVIEW_DOC_PORTS="27790-27799", REVIEW_DOC_NO_OPEN="1",
                PYTHONIOENCODING="utf-8")

@@ -26,6 +26,7 @@ import paths
 
 SLUG_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 KEEP_DAYS = 30
+_MAX_TIME = 10 ** 14  # time.localtime() raises beyond this; such a record is broken
 
 
 def drafts_dir(home=None):
@@ -58,10 +59,12 @@ def load(slug, home=None):
     except (OSError, ValueError):
         return None
     if not isinstance(rec, dict) or not _is_int(rec.get("draft")) or rec["draft"] < 1 \
-            or not _is_int(rec.get("firstRendered")):
+            or not _is_int(rec.get("firstRendered")) or not 0 < rec["firstRendered"] < _MAX_TIME:
         return None
     p = rec.get("pending")
-    pending = {"sourceMtime": p["sourceMtime"]} if isinstance(p, dict) and _is_int(p.get("sourceMtime")) else None
+    pending = None
+    if isinstance(p, dict) and _is_int(p.get("sourceMtime")) and 0 < p["sourceMtime"] < _MAX_TIME:
+        pending = {"sourceMtime": p["sourceMtime"]}
     return {"draft": rec["draft"], "firstRendered": rec["firstRendered"], "pending": pending}
 
 
@@ -94,7 +97,10 @@ def on_build(slug, source_mtime, home=None, now_ms=None):
         if p and source_mtime > p["sourceMtime"]:
             rec["draft"] += 1
             rec["pending"] = None
-            _save(slug, rec, home)
+            try:
+                _save(slug, rec, home)
+            except Exception:  # noqa: BLE001  show the promoted number; the next build retries
+                pass
         return rec
     except Exception:  # noqa: BLE001  a broken record costs a number, never a page
         return _fresh(now_ms)

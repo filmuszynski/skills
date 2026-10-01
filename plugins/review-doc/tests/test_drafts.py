@@ -5,7 +5,7 @@ import os
 import time
 from types import SimpleNamespace
 
-from harness import test, new_home
+from harness import test, new_home, patch
 
 import drafts
 
@@ -99,6 +99,38 @@ def test_a_bad_pending_is_dropped_not_fatal():
     with io.open(rec_file(h, "x"), "w", encoding="utf-8", newline="") as fh:
         fh.write('{"draft": 4, "firstRendered": 1, "pending": {"sourceMtime": "soon"}}')
     assert drafts.load("x", home=h) == {"draft": 4, "firstRendered": 1, "pending": None}
+
+
+@test
+def test_out_of_range_times_are_broken_or_dropped():
+    h = new_home()
+    os.makedirs(os.path.join(h, "drafts"))
+    for bad in (-5, 0, 10 ** 14, 10 ** 30):
+        with io.open(rec_file(h, "t"), "w", encoding="utf-8", newline="") as fh:
+            fh.write('{"draft": 3, "firstRendered": %d}' % bad)
+        assert drafts.load("t", home=h) is None, bad
+        rec = drafts.on_build("t", 1000, home=h, now_ms=42)
+        assert rec == {"draft": 1, "firstRendered": 42, "pending": None}, rec
+        with io.open(rec_file(h, "t"), "w", encoding="utf-8", newline="") as fh:
+            fh.write('{"draft": 3, "firstRendered": 7, "pending": {"sourceMtime": %d}}' % bad)
+        assert drafts.load("t", home=h) == {"draft": 3, "firstRendered": 7, "pending": None}, bad
+
+
+@test
+def test_a_failed_promoting_save_keeps_the_promoted_number():
+    h = new_home()
+    drafts.on_build("p", 1000, home=h, now_ms=5)
+    drafts.request("p", 1000, home=h)
+
+    def failing(*a, **k):
+        raise OSError("disk full")
+
+    with patch(drafts, "_save", failing):
+        rec = drafts.on_build("p", 2000, home=h, now_ms=9)
+    assert rec == {"draft": 2, "firstRendered": 5, "pending": None}, rec
+    on_disk = json.load(io.open(rec_file(h, "p"), encoding="utf-8"))
+    assert on_disk["draft"] == 1 and on_disk["pending"] == {"sourceMtime": 1000}, on_disk
+    assert drafts.on_build("p", 2000, home=h, now_ms=9)["draft"] == 2
 
 
 @test
