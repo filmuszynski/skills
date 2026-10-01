@@ -1792,13 +1792,47 @@ def test_settle_resets_when_the_file_changes_again():
 def test_polling_only_while_waiting():
     src = shell._asset("shell.js")
     assert "var POLL_MS = 2000;" in src
-    assert src.count("setInterval(") == 0, "one timeout chain, not an interval"
+    wsec = src[src.index("/* ------------------------------------------------- waiting for Claude"):src.index("/* ---------------------------------------------------------- stale source")]
+    assert wsec.count("setInterval(") == 0, "one timeout chain, not an interval"
     of = src[src.index("function openFinish("):src.index("function closeFinish(")]
     assert "if (c.wait) startWaiting();" in of
     cf = src[src.index("function closeFinish("):src.index("function onFinishCancel(")]
     assert "stopWaiting();" in cf
     assert "Paste it back to Claude, then reload this page when the revision is in." in src
     assert "The page could not be reached. Reload it once Claude is done." in src
+
+
+@test
+def test_stale_poll_cannot_start_a_second_chain():
+    import subprocess
+    src = "\n".join(js_function(n) for n in ("startWaiting", "stopWaiting", "poll", "settleStep", "waitNote"))
+    src += """
+    var POLL_MS = 2000, pollTimer = null, settle = null, pollGen = 0, timers = 0, pending = [];
+    var D = {meta: {slug: "s", sourceMtime: 100}};
+    function onServer() { return true; }
+    function persist() {}
+    var location = {reload: function () {}};
+    var doc = {getElementById: function () { return {textContent: ""}; }};
+    function setTimeout(fn) { timers++; return timers; }
+    function clearTimeout() {}
+    function fetch() { return new Promise(function (res) { pending.push(res); }); }
+    startWaiting();
+    var first = pollTimer;
+    pollTimer = null; poll(pollGen);              // timer fired: fetch in flight
+    stopWaiting(); startWaiting();                // cancel, request changes again
+    var before = timers;
+    pending[0]({ok: true, json: function () { return {mtime: 100}; }});
+    setImmediate(function () {
+      process.stdout.write(JSON.stringify({extra: timers - before, pending: pending.length}));
+    });
+    """
+    out = subprocess.run(["node", "-e", src], capture_output=True, timeout=30)
+    assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
+    got = json.loads(out.stdout.decode("utf-8"))
+    assert got == {"extra": 0, "pending": 1}, got
+    body = js_function("poll")
+    assert body.count("gen !== pollGen") == 3, body
+    assert "pollGen++" in js_function("stopWaiting")
 
 
 @test

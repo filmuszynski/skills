@@ -3025,7 +3025,11 @@
      seconds whether its source changed. Claude often writes a file in several
      edits, so it reloads only once the newer time has held for one more poll. */
   var POLL_MS = 2000;
-  var pollTimer = null, settle = null;
+  var pollTimer = null, settle = null, pollGen = 0;
+
+  /* Every start and stop moves pollGen on. A fetch that was already in flight
+     when the box closed or reopened carries the old number and so cannot touch
+     the new session or arm a second timeout chain. */
 
   function settleStep(st, mtime, built) {
     if (!(mtime > built)) return { last: mtime, quiet: 0, reload: false };
@@ -3046,21 +3050,23 @@
       return;
     }
     settle = { last: null, quiet: 0 };
-    pollTimer = setTimeout(poll, POLL_MS);
+    var gen = pollGen;
+    pollTimer = setTimeout(function () { poll(gen); }, POLL_MS);
   }
 
   function stopWaiting() {
     clearTimeout(pollTimer);
     pollTimer = null;
     settle = null;
+    pollGen++;
   }
 
-  function poll() {
-    if (!settle) return;
+  function poll(gen) {
+    if (gen !== pollGen) return;
     fetch("/api/review-source?slug=" + encodeURIComponent(D.meta.slug), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (got) {
-        if (!settle) return;
+        if (gen !== pollGen) return;
         if (!got || typeof got.mtime !== "number") {
           stopWaiting();
           waitNote("The page could not be reached. Reload it once Claude is done.");
@@ -3068,10 +3074,10 @@
         }
         settle = settleStep(settle, got.mtime, D.meta.sourceMtime);
         if (settle.reload) { stopWaiting(); persist(); location.reload(); return; }
-        pollTimer = setTimeout(poll, POLL_MS);
+        pollTimer = setTimeout(function () { poll(gen); }, POLL_MS);
       })
       .catch(function () {
-        if (!settle) return;
+        if (gen !== pollGen) return;
         stopWaiting();
         waitNote("The page could not be reached. Reload it once Claude is done.");
       });
