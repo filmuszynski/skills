@@ -121,7 +121,7 @@ def test_plan_header_fields_keep_their_wrapped_lines():
            "**Architecture:** one line only.\n"
            "**Tech Stack:** Python.\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n")
     meta = layout_plan.parse(raw)["meta"]
-    assert meta["Goal"] == "first line second line third line.", meta
+    assert " ".join(meta["Goal"].split()) == "first line second line third line.", meta
     assert meta["Architecture"] == "one line only.", meta
     assert meta["Tech Stack"] == "Python.", meta
     assert not any("agentic" in v for v in meta.values()), meta
@@ -140,62 +140,125 @@ def test_plan_footer_names_the_marker_the_page_writes():
     assert "SKIP" not in footer and "DECLINE" in footer, footer
 
 
-@test
-def test_plan_header_keeps_a_quote_under_a_field():
-    """Filip, 01.10.2026: the quoted request under **Spec:** never reached the page."""
+# ---------------------------------------------------------------- plan header
+#
+# The rule since 1.0.2: every line before the first section belongs to the field
+# above it, in source order, until the next **Field:** line. Text before the first
+# field sits above the table. Only the writing-plans banner is left out. Nothing is
+# guessed, so nothing can be dropped or moved away from the line that introduces it.
+
+import re as _re
+
+
+def _words(text):
+    return _re.findall(r"[0-9A-Za-zÀ-ɏ]+", text)
+
+
+def _glance_words(raw):
     import layout_plan
-    raw = ("# P\n\n**Spec:** the request, verbatim:\n\n> - first point\n> - second point\n\n"
-           "**Repo:** here.\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n")
-    plan = layout_plan.parse(raw)
-    assert plan["meta"]["Spec"] == "the request, verbatim:", plan["meta"]
-    assert plan["meta"]["Repo"] == "here.", plan["meta"]
-    assert "> - first point" in plan["preamble"] and "> - second point" in plan["preamble"]
-    html = layout_plan._meta_html(plan)
-    assert 'class="glance-notes"' in html and "first point" in html and "second point" in html
+    import html as _html
+    out = layout_plan._meta_html(layout_plan.parse(raw))
+    out = out.split("<h2>At a glance</h2>", 1)[1] if out else ""
+    return _words(_html.unescape(_re.sub(r"<[^>]+>", " ", out)))
+
+
+def _header_words(raw):
+    """The words of the header as written: after the title, before the first
+    section, without the banner."""
+    head = raw.split("\n# ", 1)[-1] if not raw.startswith("# ") else raw[2:]
+    head = head.split("\n", 1)[1] if "\n" in head else ""
+    head = _re.split(r"\n(?:## |### Task )", "\n" + head, maxsplit=1)[0]
+    lines, banner = [], False
+    for line in head.split("\n"):
+        if line.startswith("> **For agentic workers:**"):
+            banner = True
+        if banner and line.startswith(">"):
+            continue
+        banner = False
+        # A fence's language tag (```bash) names the code; it is never shown.
+        lines.append(_re.sub(r"^(\s*(?:```|~~~))\S+", r"\1", line))
+    return _words("\n".join(lines))
+
+
+HEADERS = {
+    "quote under a field": (
+        "# P\n\n**Request:** in 1.0.0 it vanished from the page:\n\n"
+        "> - first point\n> - second point\n\n"
+        "**Where to look:** the pill.\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n"),
+    "list, fence, table, rule": (
+        "# P\n\n**Goal:** one line\n- a list line\n1. numbered\n\n```python\ncode = 1\n```\n\n"
+        "| a | b |\n|---|---|\n| c | d |\n\nmiddle\n\n---\n\nafter the rule\n\n"
+        "**Repo:** r.\n\n## Context\n\nx\n"),
+    "prose before and between fields": (
+        "<!-- generated file -->\n\n# P\n\n> **For agentic workers:** use a skill.\n"
+        "> Second banner line.\n\nA lead paragraph.\n\n**Goal:** g\nwrapped on\n2026. a date line\n\n"
+        "A paragraph between the fields.\n\n**Repo:** r.\n\n---\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n"),
+}
 
 
 @test
-def test_plan_header_continuation_stops_at_blocks():
-    """The Phase 5 minor: a fence, a rule or a list line was glued onto the field above."""
+def test_plan_header_never_drops_or_reorders_text():
+    """Every word of the header reaches At a glance, once, in the order written."""
+    for name, raw in HEADERS.items():
+        assert _glance_words(raw) == _header_words(raw), (name, _glance_words(raw), _header_words(raw))
+
+
+@test
+def test_plan_header_fixtures_keep_every_word():
+    import glob
+    from harness import HERE
+    files = glob.glob(os.path.join(HERE, "fixtures", "plan_*.md"))
+    assert files
+    for f in files:
+        raw = io.open(f, encoding="utf-8-sig").read()
+        assert _glance_words(raw) == _header_words(raw), os.path.basename(f)
+
+
+@test
+def test_plan_header_block_stays_in_its_fields_row():
+    """Filip, 01.10.2026, twice: the quote under a field read as cut off."""
     import layout_plan
-    for block in ("```\ncode\n```", "---", "- a list line", "1. numbered", "| a | b |"):
-        raw = "# P\n\n**Goal:** one line\n%s\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n" % block
-        plan = layout_plan.parse(raw)
-        assert plan["meta"]["Goal"] == "one line", (block, plan["meta"])
-        if block != "---":   # a lone rule only frames the header, see the next test
-            assert block.split("\n")[0] in plan["preamble"], (block, plan["preamble"])
-    fenced = layout_plan.parse("# P\n\n**Goal:** g\n```\ncode\n```\n\n### Task 1: A\n")
-    assert fenced["preamble"].count("```") == 2, "each fence line lands exactly once"
-    assert "code" in fenced["preamble"]
+    html = layout_plan._meta_html(layout_plan.parse(HEADERS["quote under a field"]))
+    rows = html.split("<tr>")[1:]
+    request = [r for r in rows if "<th>Request</th>" in r][0]
+    assert "vanished from the page:" in request and "first point" in request and "second point" in request
+    assert "<blockquote>" in request, "the quote keeps its Markdown"
+    where = [r for r in rows if "<th>Where to look</th>" in r][0]
+    assert "first point" not in where
 
 
 @test
-def test_plan_header_drops_only_the_agentic_banner():
+def test_plan_header_wrapped_value_is_one_line_of_text():
     import layout_plan
-    raw = ("<!-- generated file -->\n\n# P\n\n> **For agentic workers:** use a skill.\n"
-           "> Second banner line.\n\n**Goal:** g.\n\n"
-           "A paragraph between the fields.\n\n**Repo:** r.\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n")
-    plan = layout_plan.parse(raw)
-    assert "agentic" not in plan["preamble"] and "banner" not in plan["preamble"], plan["preamble"]
-    assert "generated" not in plan["preamble"], "lines before the title stay ignored"
-    assert "A paragraph between the fields." in plan["preamble"]
-    assert plan["meta"] == {"Goal": "g.", "Repo": "r."}, plan["meta"]
+    html = layout_plan._meta_html(layout_plan.parse(
+        "# P\n\n**Goal:** first line\nsecond line.\n\n### Task 1: A\n"))
+    cell = html.split("<td>", 1)[1].split("</td>", 1)[0]
+    assert cell.strip() == "first line\nsecond line.", repr(cell)
 
 
 @test
-def test_plan_header_rule_is_not_a_preamble():
-    """The --- that closes a plan's header frames it; it is not content to show."""
+def test_plan_header_lead_text_sits_above_the_table():
+    import layout_plan
+    html = layout_plan._meta_html(layout_plan.parse(HEADERS["prose before and between fields"]))
+    assert html.index("A lead paragraph.") < html.index("<table>")
+    assert "agentic" not in html and "banner" not in html and "generated" not in html
+
+
+@test
+def test_plan_header_closing_rule_is_not_shown():
+    """The --- that closes a plan's header frames it; it is not content."""
     import layout_plan
     plan = layout_plan.parse("# P\n\n**Goal:** g.\n\n---\n\n## Context\n\nx\n")
-    assert plan["preamble"] == "", repr(plan["preamble"])
-    kept = layout_plan.parse("# P\n\n**Goal:** g.\n\n> a quote\n\n---\n\n## Context\n\nx\n")
-    assert kept["preamble"] == "> a quote", repr(kept["preamble"])
+    assert plan["meta"]["Goal"] == "g.", repr(plan["meta"]["Goal"])
+    assert "<hr" not in layout_plan._meta_html(plan)
 
 
 @test
-def test_plan_without_preamble_renders_as_before():
+def test_plan_without_header_text_renders_no_notes():
     import layout_plan
     plan = layout_plan.parse("# P\n\n**Goal:** g.\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n")
     assert plan["preamble"] == ""
     html = layout_plan._meta_html(plan)
-    assert "glance-notes" not in html and "<table>" in html
+    assert "glance-notes" not in html and "<td>g.</td>" in html
+
+

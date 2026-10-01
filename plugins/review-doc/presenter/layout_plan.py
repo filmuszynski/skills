@@ -27,8 +27,6 @@ RE_H2 = re.compile(r"^##\s+(.+?)\s*$")
 RE_STEP = re.compile(r"^-\s+\[[ xX]\]\s+(.*)$")
 RE_META = re.compile(r"^\*\*([A-Za-z][A-Za-z ]*?):\*\*\s*(.*)$")
 RE_FENCE = re.compile(r"^\s*(```|~~~)")
-# A line that starts a block of its own never continues the field above it.
-RE_NOT_WRAP = re.compile(r"^\s*(#|>|[-*+]\s|\d+[.)]\s|\||```|~~~|-{3,}\s*$|\*{3,}\s*$|_{3,}\s*$)")
 AGENTIC_BANNER = "> **For agentic workers:**"
 RE_RULE = re.compile(r"^\s*(-{3,}|\*{3,}|_{3,})\s*$")
 RE_BOLD_LEAD = re.compile(r"^\*\*(.+?)\*\*:?\s*")
@@ -106,16 +104,26 @@ def parse(raw):
         del current["lines"]
         sections.append(current)
 
+    # Before the first section every line belongs to the field above it, in the
+    # order written, until the next **Field:** line; before the first field it
+    # belongs to the preamble. Nothing is guessed, so a quote, a list or a code
+    # block stays with the line that introduces it, and nothing can go missing.
+    def header_line(line):
+        if last_meta is None:
+            preamble.append(line)
+        else:
+            meta[last_meta].append(line)
+
     for line in lines:
         fence = RE_FENCE.match(line)
         if fence:
             in_fence = not in_fence
-        # A code block before the first section goes to the preamble whole: the
-        # opening line (in_fence just turned True), the lines inside, and the
-        # closing line (fence matched, in_fence back to False). Each exactly once.
+        # A code block in the header is kept whole: the opening line (in_fence
+        # just turned True), the lines inside, and the closing line (fence
+        # matched, in_fence back to False). Each exactly once.
         if current is None and title and (in_fence or fence):
-            preamble.append(line)
-            last_meta = None
+            header_line(line)
+            in_banner = False
             continue
 
         if not in_fence:
@@ -145,27 +153,26 @@ def parse(raw):
                 continue
 
             if current is None:
+                if not title:
+                    continue        # a marker comment above the title is not header text
                 mm = RE_META.match(line)
                 if mm:
                     last_meta, in_banner = mm.group(1).strip(), False
-                    meta[last_meta] = mm.group(2).strip()
+                    # A repeated field name keeps both texts rather than the last.
+                    block = meta.setdefault(last_meta, [])
+                    if block:
+                        block.append("")
+                    block.append(mm.group(2))
                     continue
-                if last_meta and line.strip() and not RE_NOT_WRAP.match(line):
-                    # A field wrapped over several lines: plans wrap at about 90 columns.
-                    meta[last_meta] = (meta[last_meta] + " " + line.strip()).strip()
-                    continue
-                last_meta = None
                 # The writing-plans banner speaks to the executing agent; it is not
-                # part of what is reviewed. Everything else after the title is kept,
-                # so a quote or a list under a field reaches the page.
+                # part of what is reviewed.
                 if line.startswith(AGENTIC_BANNER):
                     in_banner = True
                 if in_banner:
                     if line.startswith(">"):
                         continue
                     in_banner = False
-                if title:
-                    preamble.append(line)
+                header_line(line)
                 continue
 
         if current is not None:
@@ -181,14 +188,20 @@ def parse(raw):
         else:
             seen[sec["id"]] = 0
 
-    # A rule at either end only frames the header; it is not content to show.
-    while preamble and (not preamble[0].strip() or RE_RULE.match(preamble[0])):
-        preamble.pop(0)
-    while preamble and (not preamble[-1].strip() or RE_RULE.match(preamble[-1])):
-        preamble.pop()
+    return {"title": title or "Plan", "sections": sections,
+            "meta": dict((k, _trim_block(v)) for k, v in meta.items()),
+            "preamble": _trim_block(preamble)}
 
-    return {"title": title or "Plan", "meta": meta, "sections": sections,
-            "preamble": "\n".join(preamble)}
+
+def _trim_block(lines):
+    """A header block as Markdown text. Blank lines and a rule at either end only
+    frame the header; they are not content to show."""
+    lines = list(lines)
+    while lines and (not lines[0].strip() or RE_RULE.match(lines[0])):
+        lines.pop(0)
+    while lines and (not lines[-1].strip() or RE_RULE.match(lines[-1])):
+        lines.pop()
+    return "\n".join(lines)
 
 
 # ------------------------------------------------------------------- render
@@ -272,18 +285,28 @@ def _section_html(sec, used):
     return "\n".join(parts)
 
 
+def _cell_html(text):
+    """A field's whole text as Markdown. A single paragraph loses its <p> so the
+    cell reads as one line of text, as it always has; anything more keeps its
+    blocks, so a quote or a list stays a quote or a list."""
+    html = _md(text).strip()
+    if html.startswith("<p>") and html.endswith("</p>") and html.count("<p>") == 1:
+        return html[3:-4]
+    return html
+
+
 def _meta_html(plan):
     notes = plan.get("preamble", "")
     if not plan["meta"] and not notes:
         return ""
-    rows = "".join(
-        "<tr><th>%s</th><td>%s</td></tr>" % (_esc(k), _md(v).replace("<p>", "").replace("</p>", ""))
-        for k, v in plan["meta"].items()
-    )
+    rows = "".join("<tr><th>%s</th><td>%s</td></tr>" % (_esc(k), _cell_html(v))
+                   for k, v in plan["meta"].items())
     table = "<table>%s</table>" % rows if rows else ""
-    extra = '<div class="glance-notes">%s</div>' % _md(notes) if notes else ""
+    # Text written before the first field leads, above the table, as it does in
+    # the source.
+    lead = '<div class="glance-notes">%s</div>' % _md(notes) if notes else ""
     return ('<div class="sec" data-sec="__meta"><div class="sec-tag"></div>'
-            "<h2>At a glance</h2>%s%s</div>" % (table, extra))
+            "<h2>At a glance</h2>%s%s</div>" % (lead, table))
 
 
 def slug_for(source):
