@@ -351,6 +351,32 @@ class ReviewServer(object):
                 self._meta_cache[slug] = (mtime, meta)
         return frame_server.file_target(meta)
 
+    def note_served(self, slug, path):
+        """Remember a file the frame served, with its mtime then (the 1.2 stale check)."""
+        try:
+            mtime = int(os.path.getmtime(path) * 1000)
+        except OSError:
+            return
+        with self._guard:
+            seen = self._served.setdefault(slug, {})
+            if path not in seen and len(seen) < MAX_SERVED:
+                seen[path] = mtime
+
+    def served_mtime(self, slug):
+        """The newest mtime among served files that changed after they were served,
+        or None. A file that was simply newer than the page all along is no change."""
+        with self._guard:
+            seen = dict(self._served.get(slug, {}))
+        newest = None
+        for path, first in seen.items():
+            try:
+                now = int(os.path.getmtime(path) * 1000)
+            except OSError:
+                continue
+            if now > first and (newest is None or now > newest):
+                newest = now
+        return newest
+
     def freshen(self, slug, path):
         """Rebuild the page first if its source is newer than the page says.
         Any failure serves the page as it is: a stale page beats no page."""
@@ -482,14 +508,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _review_source(self, slug):
         path = self.app.page_path(slug)
-        src = source_of(pages.read_meta(path)) if path and os.path.isfile(path) else None
-        if not src:
-            return self._json(404, {"ok": False})
+        meta = pages.read_meta(path) if path and os.path.isfile(path) else None
         # "page" lets a waiting page tell a re-render from Claude's first edit.
         try:
-            built = int(os.path.getmtime(path) * 1000)
+            built = int(os.path.getmtime(path) * 1000) if meta is not None else None
         except OSError:
             built = None
+        target = frame_server.file_target(meta)
+        if target:
+            # An HTML page's source is its entry file plus every file the frame
+            # served that changed since (1.2).
+            try:
+                mtime = int(os.path.getmtime(os.path.join(target["root"], target["entry"])) * 1000)
+            except OSError:
+                return self._json(404, {"ok": False})
+            return self._json(200, {"mtime": max(mtime, self.app.served_mtime(slug) or 0), "page": built})
+        src = source_of(meta)
+        if not src:
+            return self._json(404, {"ok": False})
         return self._json(200, {"mtime": int(os.path.getmtime(src) * 1000), "page": built})
 
     def _draft(self, data):

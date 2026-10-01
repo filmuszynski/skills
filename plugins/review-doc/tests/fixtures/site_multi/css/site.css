@@ -1,0 +1,6 @@
+/* Its own reset, the highest z-index and a locked body: what the probe's layer has to survive. */
+* { margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { overflow: hidden; font-family: sans-serif; }
+.top { position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647; background: #123; color: #fff; padding: 8px; }
+#hero { padding: 6rem 2rem; background: rgb(0, 128, 0); color: #fff; }

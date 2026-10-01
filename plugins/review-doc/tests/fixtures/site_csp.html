@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'nonce-pagefixture' 'strict-dynamic'; object-src 'none'">
+<title>Strict CSP fixture</title>
+</head>
+<body>
+<p id="own">waiting</p>
+<script nonce="pagefixture">document.getElementById("own").textContent = "own script ran";</script>
+</body>
+</html>

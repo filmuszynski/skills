@@ -140,3 +140,219 @@ def test_stop_closes_the_frame_listeners():
         assert s.connect_ex(("127.0.0.1", fp)) != 0, "nothing listens on the frame port any more"
     finally:
         s.close()
+
+
+def site(home, name="site_multi"):
+    root = os.path.join(home, "site")
+    shutil.copytree(os.path.join(FIX, name), root)
+    return root
+
+
+def _write(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(data if isinstance(data, bytes) else data.encode("utf-8"))
+
+
+PROBE_RE = r'<script src="/__review-doc/probe.js" nonce="([0-9a-f]{32})"></script>'
+
+
+@test
+def test_frame_serves_the_site_with_the_probe():
+    h = new_home()
+    root = site(h)
+    html_page(h, SLUG, root)
+    with serving(h) as srv:
+        status, hd, data = frame_request(srv, "GET", "/", SLUG)
+        assert status == 200 and hd["content-type"] == "text/html; charset=utf-8", (status, hd)
+        text = data.decode("utf-8")
+        m = re.search("<head>" + PROBE_RE, text)
+        assert m, text[:200]
+        assert hd["cache-control"] == "no-store" and "x-frame-options" not in hd
+        again = frame_request(srv, "GET", "/index.html", SLUG)[2].decode("utf-8")
+        assert re.search(PROBE_RE, again) and m.group(1) not in again, "a fresh nonce per response"
+        for rel, ctype in (("/css/site.css", "text/css"), ("/img/dot.svg", "image/svg+xml"),
+                           ("/js/app.js", "text/javascript")):
+            status, hd, data = frame_request(srv, "GET", rel, SLUG)
+            with open(os.path.join(root, *rel.strip("/").split("/")), "rb") as fh:
+                assert status == 200 and data == fh.read(), rel
+            assert hd["content-type"] == ctype, (rel, hd["content-type"])
+        status, hd, data = frame_request(srv, "GET", "/__review-doc/probe.js", SLUG)
+        assert status == 200 and hd["content-type"] == "text/javascript; charset=utf-8"
+        assert b"review-doc probe" in data
+
+
+@test
+def test_frame_refuses_what_is_not_the_site():
+    h = new_home()
+    root = site(h)
+    html_page(h, SLUG, root)
+    _write(os.path.join(root, ".env"), "SECRET=1")
+    _write(os.path.join(root, ".git", "config"), "[core]")
+    _write(os.path.join(root, "notes.txt"), "n")
+    _write(os.path.join(h, "outside.html"), "outside")
+    _write(os.path.join(root, "__review-doc", "probe.js"), "evil")
+    with serving(h) as srv:
+        for p in ("/.env", "/.git/config", "/notes.txt", "/../outside.html", "/%2e%2e/outside.html",
+                  "/__review-doc/other.js", "/missing.html"):
+            assert frame_request(srv, "GET", p, SLUG)[0] == 404, p
+        assert b"evil" not in frame_request(srv, "GET", "/__review-doc/probe.js", SLUG)[2]
+
+
+@test
+def test_strict_csp_page_gets_our_nonce_beside_its_own():
+    h = new_home()
+    root = os.path.join(h, "site")
+    os.makedirs(root)
+    shutil.copy(os.path.join(FIX, "site_csp.html"), os.path.join(root, "index.html"))
+    html_page(h, SLUG, root)
+    with serving(h) as srv:
+        text = frame_request(srv, "GET", "/", SLUG)[2].decode("utf-8")
+    nonce = re.search(PROBE_RE, text).group(1)
+    assert ("content=\"script-src 'nonce-pagefixture' 'strict-dynamic' 'nonce-%s'; object-src 'none'\""
+            % nonce) in text, text
+    assert '<script nonce="pagefixture">' in text
+
+
+@test
+def test_entry_with_a_space_and_head_requests():
+    h = new_home()
+    root = os.path.join(h, "site")
+    os.makedirs(root)
+    shutil.copy(os.path.join(FIX, "site_single.html"), os.path.join(root, "my page.html"))
+    html_page(h, SLUG, root, entry="my page.html")
+    with serving(h) as srv:
+        status, _, data = frame_request(srv, "GET", "/", SLUG)
+        assert status == 200 and b"/__review-doc/probe.js" in data
+        assert frame_request(srv, "GET", "/my%20page.html", SLUG)[0] == 200
+        status, hd, data = frame_request(srv, "HEAD", "/", SLUG)
+        assert status == 200 and data == b"" and int(hd["content-length"]) > 0
+
+
+@test
+def test_byte_range_on_media():
+    h = new_home()
+    root = site(h)
+    html_page(h, SLUG, root)
+    payload = bytes(range(256)) * 4
+    _write(os.path.join(root, "media", "clip.mp4"), payload)
+    with serving(h) as srv:
+        status, hd, data = frame_request(srv, "GET", "/media/clip.mp4", SLUG, headers={"Range": "bytes=10-19"})
+        assert status == 206 and data == payload[10:20] and hd["content-range"] == "bytes 10-19/1024"
+        status, hd, _ = frame_request(srv, "GET", "/media/clip.mp4", SLUG, headers={"Range": "bytes=5000-"})
+        assert status == 416 and hd["content-range"] == "bytes */1024"
+        status, hd, data = frame_request(srv, "GET", "/media/clip.mp4", SLUG)
+        assert status == 200 and hd["accept-ranges"] == "bytes" and data == payload
+        assert hd["content-type"] == "video/mp4"
+
+
+def _source_mtime(srv, slug=SLUG):
+    status, _, data = request(srv, "GET", "/api/review-source?slug=" + slug)
+    assert status == 200, status
+    return json.loads(data.decode("utf-8"))["mtime"]
+
+
+def _ms(path):
+    return int(os.path.getmtime(path) * 1000)
+
+
+@test
+def test_an_asset_newer_than_the_page_is_not_a_change():
+    h = new_home()
+    root = site(h)
+    html_page(h, SLUG, root)
+    entry, css = os.path.join(root, "index.html"), os.path.join(root, "css", "site.css")
+    old = time.time() - 100
+    os.utime(entry, (old, old))
+    # copytree keeps the fixture's own mtime, so make "newer than the page" a fact.
+    os.utime(css, (old + 50, old + 50))
+    with serving(h) as srv:
+        frame_request(srv, "GET", "/", SLUG)
+        frame_request(srv, "GET", "/css/site.css", SLUG)
+        assert _ms(css) > _ms(entry)
+        assert _source_mtime(srv) == _ms(entry)
+
+
+@test
+def test_review_source_follows_served_files_and_resets_on_rebuild():
+    h = new_home()
+    root = site(h)
+    html_page(h, SLUG, root)
+    entry, css = os.path.join(root, "index.html"), os.path.join(root, "css", "site.css")
+    page = os.path.join(h, "pages", SLUG + ".html")
+    old = time.time() - 100
+    for p in (entry, css, page):
+        os.utime(p, (old, old))
+    with serving(h) as srv:
+        assert _source_mtime(srv) == _ms(entry)
+        frame_request(srv, "GET", "/", SLUG)
+        frame_request(srv, "GET", "/css/site.css", SLUG)
+        assert _source_mtime(srv) == _ms(entry), "served, not changed"
+        new = time.time()
+        os.utime(css, (new, new))
+        assert _source_mtime(srv) == _ms(css), "a changed stylesheet is a changed source"
+        # Claude re-renders: the page is rebuilt and the frame reloads its files.
+        os.utime(page, (new + 5, new + 5))
+        frame_request(srv, "GET", "/", SLUG)
+        frame_request(srv, "GET", "/css/site.css", SLUG)
+        assert _source_mtime(srv) == _ms(entry), "the record starts again after a rebuild"
+
+
+@test
+def test_review_source_for_md_pages_is_unchanged():
+    h = new_home()
+    md = os.path.join(h, "notes.md")
+    _write(md, "# T\n")
+    meta = {"slug": "notes-1a2b3c", "kind": "doc", "source": md.replace("\\", "/")}
+    shell.write(os.path.join(h, "pages", "notes-1a2b3c.html"),
+                "<script>\nwindow.PRESENTER_DATA = %s;\n</script>\n" % shell._json_literal({"meta": meta}))
+    with serving(h) as srv:
+        assert _source_mtime(srv, "notes-1a2b3c") == _ms(md)
+
+
+@test
+def test_no_second_response_after_headers_went_out():
+    import frame_server
+
+    class App(object):
+        frame_port = 27877
+        last_request = 0
+
+        def __init__(self):
+            self.logged = []
+
+        def frame_target(self, slug):
+            return {"root": "/", "entry": "index.html"}
+
+        def log(self, msg):
+            self.logged.append(msg)
+
+    h = object.__new__(frame_server.FrameHandler)
+    h.server = type("S", (), {"app": App()})()
+    h.headers = {"Host": "%s.localhost:27877" % SLUG}
+    h.path, h.command, h.close_connection = "/x", "GET", False
+    sent = []
+    h.send_response = lambda code: sent.append(code)
+    h.send_header = lambda k, v: None
+    h.end_headers = lambda: None
+    h.wfile = io.BytesIO()
+
+    def broken(slug, target, path):
+        h._head(200, "text/css", 10)  # the headers are out, then the file fails
+        raise RuntimeError("disk went away")
+
+    h._file_mode = broken
+    h._serve()
+    assert sent == [200], sent  # no 500 on top of the 200
+    assert h.close_connection is True and h.wfile.getvalue() == b""
+    assert any("disk went away" in m for m in h.server.app.logged)
+    # A failure before any header still gets its 500.
+    sent[:] = []
+    h.close_connection = False
+
+    def early(slug, target, path):
+        raise RuntimeError("early")
+
+    h._file_mode = early
+    h._serve()
+    assert sent == [500], sent

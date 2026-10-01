@@ -16,9 +16,10 @@ import html as _html
 import http.server
 import os
 import re
+import secrets
 import time
 import traceback
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import pages
 
@@ -302,6 +303,7 @@ class FrameHandler(http.server.BaseHTTPRequestHandler):
         if target is None:
             return self._plain(403, "Forbidden: no HTML review answers to this name.\n")
         path = urlsplit(self.path).path or "/"
+        self._sent = False
         try:
             return self._file_mode(slug, target, path)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -309,8 +311,70 @@ class FrameHandler(http.server.BaseHTTPRequestHandler):
         except Exception:  # noqa: BLE001
             self.app.log("frame %s %s failed: %s"
                          % (slug, path, traceback.format_exc().strip().splitlines()[-1]))
+            if self._sent:
+                # Headers are out: a second response would corrupt the stream.
+                self.close_connection = True
+                return None
             return self._plain(500, "Internal error; see server.log in the review-doc folder.\n")
 
     def _file_mode(self, slug, target, path):
-        # Task 3 serves the folder; until then nothing is.
-        return self._plain(404, "Not found.\n")
+        if path == PROBE_PATH:
+            return self._probe()
+        if path.startswith(RESERVED):
+            return self._plain(404, "Not found.\n")
+        file = resolve(target["root"], "/" + quote(target["entry"]) if path == "/" else path)
+        if file is None:
+            return self._plain(404, "Not found.\n")
+        self.app.note_served(slug, file)
+        if os.path.splitext(file)[1].lower() in HTML_EXT:
+            return self._html(file)
+        return self._file(file)
+
+    def _head(self, code, ctype, length, extra=()):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(length))
+        # Every reload shows the file as it is now, never a cached copy.
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in extra:
+            self.send_header(k, v)
+        self.end_headers()
+        self._sent = True
+
+    def _probe(self):
+        with open(PROBE_FILE, "rb") as fh:
+            data = fh.read()
+        self._head(200, "text/javascript; charset=utf-8", len(data))
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _html(self, file):
+        with open(file, "rb") as fh:
+            raw = fh.read()
+        data, ctype = rewrite_html(raw, secrets.token_hex(16))
+        self._head(200, ctype, len(data))
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _file(self, file):
+        size = os.path.getsize(file)
+        rng = parse_range(self.headers.get("Range"), size)
+        if rng == "bad":
+            return self._plain(416, "Range not satisfiable.\n", [("Content-Range", "bytes */%d" % size)])
+        start, end = rng or (0, size - 1)
+        extra = [("Accept-Ranges", "bytes")]
+        if rng:
+            extra.append(("Content-Range", "bytes %d-%d/%d" % (start, end, size)))
+        self._head(206 if rng else 200, TYPES[os.path.splitext(file)[1].lower()], end - start + 1, extra)
+        if self.command == "HEAD":
+            return
+        with open(file, "rb") as fh:
+            fh.seek(start)
+            left = end - start + 1
+            while left > 0:
+                chunk = fh.read(min(left, 65536))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                left -= len(chunk)
