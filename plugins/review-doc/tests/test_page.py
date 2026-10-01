@@ -186,10 +186,19 @@ def test_credit_line_sits_on_the_text_column():
 
 
 @test
-def test_credit_line_is_centred():
+def test_credit_line_sits_left():
+    """Centred in 1.0.1, back to the left in 1.0.2 (Filip, 01.10.2026)."""
     rule = css().split("#doc .credit {", 1)[1].split("}", 1)[0]
-    assert "text-align: center" in rule
+    assert "text-align" not in rule, "left, like the text above it"
     assert "max-width: calc(57.3em / .8)" in rule, "still on the text column"
+
+
+@test
+def test_glance_blocks_sit_tight_in_their_cells():
+    c = css()
+    assert '.sec[data-sec="__meta"] .glance-notes { margin-bottom: .9em; }' in c, "the lead sits above the table"
+    assert '.sec[data-sec="__meta"] td > :first-child { margin-top: 0; }' in c
+    assert '.sec[data-sec="__meta"] td > :last-child { margin-bottom: 0; }' in c
 
 
 @test
@@ -220,6 +229,6 @@ def test_pill_colours_and_peek():
         assert "--pill-bg: %s;" % bg in rule and "--pill-ink: %s;" % ink in rule, kind
     base = c.split("header .eyebrow {", 1)[1].split("}", 1)[0]
     assert "border-radius: 999px" in base and "background: var(--pill-bg" in base
-    peek = c.split("header.title-peek .eyebrow {", 1)[1].split("}", 1)[0]
-    assert "margin-right: -14px" in peek and "margin-left" not in peek, "it now sits left of the title"
-    assert "padding-left: 0" in peek and "padding-right: 0" in peek, "collapses to nothing"
+    # 1.0.2: the pill stays while a cut title is shown whole; only the controls go.
+    assert "header.title-peek .eyebrow" not in c, "nothing hides the pill on peek"
+    assert "transition" not in base, "the pill no longer animates"

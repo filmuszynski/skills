@@ -745,7 +745,7 @@ def test_resting_on_a_cut_title_gives_it_the_whole_row():
     assert '<span class="doc-title">' in html, "no tooltip repeating the widened title"
     css = io.open(os.path.join(PRESENTER, "assets", "shell.css"), encoding="utf-8").read()
     assert "grid-template-columns: 0fr;" in css.split("header.title-peek .controls-slot {")[1][:120]
-    assert "header.title-peek .eyebrow" in css
+    assert "header.title-peek .eyebrow" not in css, "the pill stays in front of the title (1.0.2)"
     js = io.open(os.path.join(PRESENTER, "assets", "shell.js"), encoding="utf-8").read()
     assert "PEEK_DELAY = 200" in js
     assert "if (title.scrollWidth <= title.clientWidth + 1) return;" in js, "a whole title does not peek"
@@ -1708,10 +1708,11 @@ def test_page_checks_source_and_expires_old_marks():
 
 @test
 def test_request_changes_loop_sits_higher_with_more_air():
-    """Filip, 01.10.2026: the loop sat 2px too low and 2px too close to its label."""
+    """Filip, 01.10.2026: the loop sat too low and too close to its label. 1.0.1 lifted
+    it 2px; 1.0.2 brought it back down 1px, so it sits 1px above 1.0.0."""
     css = io.open(os.path.join(PRESENTER, "assets", "shell.css"), encoding="utf-8").read()
     loop = css.split(chr(10) + ".ico-loop {")[1].split("}")[0]
-    assert "vertical-align: calc(-.12em + 2px);" in loop
+    assert "vertical-align: calc(-.12em + 1px);" in loop
     assert "margin-right: 2px;" in loop
     reset = css.split(chr(10) + ".ico-reset {")[1].split("}")[0]
     assert "margin-right" not in reset, "the header reset loop is not moved"
