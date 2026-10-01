@@ -295,4 +295,5 @@ def test_overlay_css_blurs_and_respects_reduced_motion():
 def test_hidden_close_button_really_hides():
     assert "#finish-close[hidden] { display: none; }" in css()
     body = fn_body(js(), "openFinish")
-    assert "if (!finishKind) finishFrom = doc.activeElement;" in body
+    assert ("if (!finishKind) finishFrom = doc.querySelector('.verdict[data-verdict=\"' + kind + '\"]')"
+            " || doc.activeElement;") in body, "Cancel returns focus to the verdict button"

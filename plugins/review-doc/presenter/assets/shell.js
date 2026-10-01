@@ -2666,7 +2666,9 @@
     if (!c || !root) return;
     closeBubble();
     hideTip();
-    if (!finishKind) finishFrom = doc.activeElement;
+    /* The copy may have run through the async clipboard, so activeElement is
+       not reliably the button that was pressed. Name it instead. */
+    if (!finishKind) finishFrom = doc.querySelector('.verdict[data-verdict="' + kind + '"]') || doc.activeElement;
     finishKind = kind;
     root.querySelector(".finish-title-text").textContent = c.title;
     finishEl("finish-text").textContent = c.text;
