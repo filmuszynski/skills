@@ -200,3 +200,18 @@ def test_tooltips_can_be_switched_off():
     assert "applyTipsSetting(res.settings)" in panel, "a save takes effect on this page at once"
     wire = src.split("function wire() {", 1)[1].split("\n  }", 1)[0]
     assert "applyTipsSetting(" in wire and "cachedShowTips()" in wire
+
+
+@test
+def test_pill_colours_and_peek():
+    c = css()
+    want = {"md": ("#F0844E", "#2a1608"), "html": ("#9FD3F2", "#0d3550"),
+            "plan": ("#8E1B1B", "#fff"), "choice": ("#1F3A8A", "#fff")}
+    for kind, (bg, ink) in want.items():
+        rule = c.split('header .eyebrow[data-kind="%s"] {' % kind, 1)[1].split("}", 1)[0]
+        assert "--pill-bg: %s;" % bg in rule and "--pill-ink: %s;" % ink in rule, kind
+    base = c.split("header .eyebrow {", 1)[1].split("}", 1)[0]
+    assert "border-radius: 999px" in base and "background: var(--pill-bg" in base
+    peek = c.split("header.title-peek .eyebrow {", 1)[1].split("}", 1)[0]
+    assert "margin-right: -14px" in peek and "margin-left" not in peek, "it now sits left of the title"
+    assert "padding-left: 0" in peek and "padding-right: 0" in peek, "collapses to nothing"

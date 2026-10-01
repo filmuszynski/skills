@@ -88,7 +88,7 @@ header .doc-title {
 }
 
 /* Resting on a cut title for a moment (title-peek, set in shell.js) sends
-   every control away, eyebrow included, so the whole row is the title's. The
+   every control away, pill included, so the whole row is the title's. The
    controls close as one column: 0fr to 1fr animates where display cannot, and
    the title simply grows into the room as it opens. The negative margin takes
    back the header gap the empty column would still hold. Visibility follows
@@ -113,12 +113,26 @@ header .doc-title {
 /* Squeezed to nothing, the buttons would wrap their labels and the hidden
    column would grow the header by a line. They clip instead. */
 .controls > * { flex-shrink: 0; }
+/* The page kind as a pill in front of the title, one colour per kind so a row
+   of tabs can be told apart at a glance. Unknown kinds fall back to the
+   neutral surface. Every pair clears 4.5:1. */
 header .eyebrow {
   white-space: nowrap;
   overflow: hidden;
   max-width: 12em;
-  transition: max-width .25s ease, opacity .2s ease, margin-left .25s ease;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  line-height: 1.4;
+  background: var(--pill-bg, var(--surface));
+  color: var(--pill-ink, var(--label));
+  transition: max-width .25s ease, opacity .2s ease, margin-right .25s ease,
+              padding .25s ease;
 }
+header .eyebrow[data-kind="md"] { --pill-bg: #F0844E; --pill-ink: #2a1608; }
+header .eyebrow[data-kind="html"] { --pill-bg: #9FD3F2; --pill-ink: #0d3550; }
+header .eyebrow[data-kind="plan"] { --pill-bg: #8E1B1B; --pill-ink: #fff; }
+header .eyebrow[data-kind="choice"] { --pill-bg: #1F3A8A; --pill-ink: #fff; }
 header.title-peek .controls-slot {
   grid-template-columns: 0fr;
   opacity: 0;
@@ -127,7 +141,13 @@ header.title-peek .controls-slot {
   transition: grid-template-columns .25s ease, opacity .2s ease, margin-left .25s ease,
               visibility 0s linear .25s;
 }
-header.title-peek .eyebrow { max-width: 0; opacity: 0; margin-left: -14px; }
+header.title-peek .eyebrow {
+  max-width: 0;
+  opacity: 0;
+  margin-right: -14px;
+  padding-left: 0;
+  padding-right: 0;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .controls-slot, header.title-peek .controls-slot, header .eyebrow { transition: none; }

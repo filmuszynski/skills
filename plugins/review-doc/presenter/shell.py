@@ -56,8 +56,8 @@ __CSS__
 </head>
 <body class="mode-comment prompt-hidden">
 <header>
+  <span class="eyebrow" data-kind="__PILL__">__KIND__</span>
   <span class="doc-title">__SHORT__</span>
-  <span class="eyebrow">__KIND__</span>
   <div class="spacer"></div>
   <div class="controls-slot"><div class="controls">
   <div class="counters" role="group" aria-label="Jump through your feedback">
@@ -253,9 +253,13 @@ def _actions_html(actions):
     return chr(10).join(out)
 
 
-# What the header's small label says. A document page names its file type, a plan or a
-# choice screen names what it is; meta.kind itself is unchanged.
-EYEBROW_LABEL = {"doc": "MD"}
+# What the header's pill says, and which colour it wears. A document page names its
+# file type, a plan or a choice screen names what it is; meta.kind itself is unchanged.
+# Both screen kinds are one switch in the settings, so they are one pill too.
+EYEBROW_LABEL = {"doc": "MD", "html": "HTML", "plan": "PLAN",
+                 "options": "CHOICE", "explain": "CHOICE"}
+PILL_KIND = {"doc": "md", "html": "html", "plan": "plan",
+             "options": "choice", "explain": "choice"}
 
 
 def render(title, body_html, sections, prompt_spec, meta,
@@ -287,6 +291,7 @@ def render(title, body_html, sections, prompt_spec, meta,
     out = out.replace("__ACTIONS__", _actions_html(actions))
     out = out.replace("__GENERAL__", _esc(general_placeholder or "A note on the whole plan, optional"))
     kind = meta.get("kind", "document")
+    out = out.replace("__PILL__", _esc(PILL_KIND.get(kind, "")))
     out = out.replace("__KIND__", _esc(EYEBROW_LABEL.get(kind, kind)))
     # Not cut to length: the header shortens it with an ellipsis while the
     # counters show, and widens to the whole name when they slide away.

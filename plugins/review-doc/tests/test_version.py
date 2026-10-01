@@ -14,8 +14,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 
 
 def eyebrow(html):
-    start = html.index('<span class="eyebrow">') + len('<span class="eyebrow">')
+    start = html.index('<span class="eyebrow"')
+    start = html.index(">", start) + 1
     return html[start:html.index("</span>", start)]
+
+
+def pill_kind(html):
+    tag = html[html.index('<span class="eyebrow"'):]
+    return tag.split('data-kind="', 1)[1].split('"', 1)[0]
 
 
 @test
@@ -28,7 +34,33 @@ def test_doc_pages_say_md():
 @test
 def test_plan_pages_keep_plan():
     built = layout_plan.build("# P\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n", source="/x/p.md")
-    assert eyebrow(shell.render(**built)).lower() == "plan"
+    assert eyebrow(shell.render(**built)) == "PLAN"
+
+
+@test
+def test_every_kind_wears_its_pill():
+    doc = shell.render(**layout_doc.build("# T\n\n## A\n\nx\n", source="/x/t.md"))
+    plan = shell.render(**layout_plan.build("# P\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n", source="/x/p.md"))
+    assert (eyebrow(doc), pill_kind(doc)) == ("MD", "md")
+    assert (eyebrow(plan), pill_kind(plan)) == ("PLAN", "plan")
+    for kind in ("options", "explain"):
+        assert shell.EYEBROW_LABEL[kind] == "CHOICE" and shell.PILL_KIND[kind] == "choice"
+    assert shell.EYEBROW_LABEL["html"] == "HTML" and shell.PILL_KIND["html"] == "html"
+
+
+@test
+def test_pill_sits_left_of_the_title():
+    html = shell.render(**layout_doc.build("# T\n\n## A\n\nx\n", source="/x/t.md"))
+    head = html.split("<header>", 1)[1]
+    assert head.index('class="eyebrow"') < head.index('class="doc-title"')
+
+
+@test
+def test_unknown_kind_still_renders():
+    built = layout_doc.build("# T\n\n## A\n\nx\n", source="/x/t.md")
+    built["meta"]["kind"] = "future"
+    html = shell.render(**built)
+    assert eyebrow(html) == "future" and pill_kind(html) == ""
 
 
 @test
