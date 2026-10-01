@@ -80,16 +80,64 @@ def _split_steps(body_lines):
     return "\n".join(intro).strip("\n"), out
 
 
+RE_FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+RE_FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})\s*$")
+RE_SETEXT = re.compile(r"^ {0,3}(-+|=+)\s*$")
+
+
+def _fence_marks(lines):
+    """For each line, whether it belongs to a fenced code block (fences included).
+
+    A fence closes only on the same character, at least as long as the opening one,
+    as Markdown has it, so a ``` line inside a ~~~ block is code. An opening fence
+    that never closes is not a fence at all: it is read as text, rather than
+    swallowing everything after it.
+    """
+    literal = set()
+    while True:
+        marks, marker, start = [], None, None
+        for i, line in enumerate(lines):
+            if marker is None:
+                m = None if i in literal else RE_FENCE_OPEN.match(line)
+                if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                    marker, start = m.group(1), i
+                    marks.append(True)
+                else:
+                    marks.append(False)
+            else:
+                marks.append(True)
+                c = RE_FENCE_CLOSE.match(line)
+                if c and c.group(1)[0] == marker[0] and len(c.group(1)) >= len(marker):
+                    marker = None
+        if marker is None:
+            return marks
+        literal.add(start)
+
+
 def parse(raw):
-    """Markdown text to {title, meta, sections}."""
+    """Markdown text to {title, meta, sections, preamble}."""
     text = _strip_front_matter(_strip_bom(raw)).replace("\r\n", "\n")
     lines = text.split("\n")
+    fenced = _fence_marks(lines)
+
+    # Is there a title at all, before the first section? Without one the header
+    # starts at the top of the file; with one, everything above it (a marker
+    # comment) is not header text.
+    has_title = False
+    for line, code in zip(lines, fenced):
+        if code:
+            continue
+        if line.startswith("# "):
+            has_title = True
+            break
+        if RE_TASK.match(line) or RE_H2.match(line):
+            break
 
     title, meta, last_meta = "", {}, None
     preamble, in_banner = [], False
+    header_open = not has_title
     sections, current = [], None
     plain_count = 0
-    in_fence = False
 
     def close():
         if current is None:
@@ -108,75 +156,73 @@ def parse(raw):
     # order written, until the next **Field:** line; before the first field it
     # belongs to the preamble. Nothing is guessed, so a quote, a list or a code
     # block stays with the line that introduces it, and nothing can go missing.
-    def header_line(line):
-        if last_meta is None:
-            preamble.append(line)
-        else:
-            meta[last_meta].append(line)
+    def header_line(line, code=False):
+        block = preamble if last_meta is None else meta[last_meta]
+        # A --- or === straight under text would make that text a heading
+        # (a setext underline). In the header it is a rule, so it gets its own line.
+        if not code and RE_SETEXT.match(line) and block and block[-1].strip():
+            block.append("")
+        block.append(line)
 
-    for line in lines:
-        fence = RE_FENCE.match(line)
-        if fence:
-            in_fence = not in_fence
-        # A code block in the header is kept whole: the opening line (in_fence
-        # just turned True), the lines inside, and the closing line (fence
-        # matched, in_fence back to False). Each exactly once.
-        if current is None and title and (in_fence or fence):
-            header_line(line)
-            in_banner = False
+    for line, code in zip(lines, fenced):
+        if code:
+            if current is not None:
+                current["lines"].append(line)
+            elif header_open:
+                header_line(line, code=True)
+                in_banner = False
             continue
 
-        if not in_fence:
-            if not title and line.startswith("# "):
-                title = line[2:].strip()
-                continue
+        if has_title and not title and line.startswith("# "):
+            title = line[2:].strip()
+            header_open = True
+            continue
 
-            mt = RE_TASK.match(line)
-            if mt:
-                close()
-                name = mt.group(2).strip()
-                current = {"id": _hash("task " + name, "s"), "num": "Task " + mt.group(1),
-                           "index": mt.group(1),
-                           "name": name, "kind": "task", "lines": []}
-                continue
+        mt = RE_TASK.match(line)
+        if mt:
+            close()
+            name = mt.group(2).strip()
+            current = {"id": _hash("task " + name, "s"), "num": "Task " + mt.group(1),
+                       "index": mt.group(1),
+                       "name": name, "kind": "task", "lines": []}
+            continue
 
-            mh = RE_H2.match(line)
-            if mh:
-                close()
-                plain_count += 1
-                name = mh.group(1).strip()
-                # "1" alone said nothing. The prompt reads better for it too:
-                # "Section 1 (Context)" rather than "1 (Context)".
-                current = {"id": _hash("sec " + name, "s"), "num": "Section " + str(plain_count),
-                           "index": str(plain_count),
-                           "name": name, "kind": "section", "lines": []}
-                continue
-
-            if current is None:
-                if not title:
-                    continue        # a marker comment above the title is not header text
-                mm = RE_META.match(line)
-                if mm:
-                    last_meta, in_banner = mm.group(1).strip(), False
-                    # A repeated field name keeps both texts rather than the last.
-                    block = meta.setdefault(last_meta, [])
-                    if block:
-                        block.append("")
-                    block.append(mm.group(2))
-                    continue
-                # The writing-plans banner speaks to the executing agent; it is not
-                # part of what is reviewed.
-                if line.startswith(AGENTIC_BANNER):
-                    in_banner = True
-                if in_banner:
-                    if line.startswith(">"):
-                        continue
-                    in_banner = False
-                header_line(line)
-                continue
+        mh = RE_H2.match(line)
+        if mh:
+            close()
+            plain_count += 1
+            name = mh.group(1).strip()
+            # "1" alone said nothing. The prompt reads better for it too:
+            # "Section 1 (Context)" rather than "1 (Context)".
+            current = {"id": _hash("sec " + name, "s"), "num": "Section " + str(plain_count),
+                       "index": str(plain_count),
+                       "name": name, "kind": "section", "lines": []}
+            continue
 
         if current is not None:
             current["lines"].append(line)
+            continue
+
+        if not header_open:
+            continue        # a marker comment above the title is not header text
+        mm = RE_META.match(line)
+        if mm:
+            last_meta, in_banner = mm.group(1).strip(), False
+            # A repeated field name keeps both texts rather than the last.
+            block = meta.setdefault(last_meta, [])
+            if block:
+                block.append("")
+            block.append(mm.group(2))
+            continue
+        # The writing-plans banner speaks to the executing agent; it is not
+        # part of what is reviewed.
+        if line.startswith(AGENTIC_BANNER):
+            in_banner = True
+        if in_banner:
+            if line.startswith(">"):
+                continue
+            in_banner = False
+        header_line(line)
 
     close()
 

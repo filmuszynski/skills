@@ -12,7 +12,12 @@ and the project uses [Semantic Versioning](https://semver.org/).
 - A plan's At a glance keeps everything written under a field in that field's row, in
   the order written: a quote, list, table or code block now sits right under the line
   that introduces it instead of below the whole table. Text before the first field
-  leads above the table.
+  leads above the table. A plan without a `#` title keeps its fields, and a `---`
+  straight under a field's text no longer turns that text into a heading.
+- Code fences in plans close the way Markdown closes them: only on the same character,
+  at least as long. A ``` line inside a ```` or ~~~ example no longer ends the block
+  early, and a fence that never closes is read as text instead of swallowing the
+  rest of the plan.
 - The page type pill stays in front of the title when a cut-off title is shown whole;
   only the buttons slide away.
 - The Request changes icon sits 1px lower than in 1.0.1.

@@ -88,8 +88,8 @@ header .doc-title {
 }
 
 /* Resting on a cut title for a moment (title-peek, set in shell.js) sends
-   every control away, so the rest of the row is the title's; the pill stays in front of it. The
-   controls close as one column: 0fr to 1fr animates where display cannot, and
+   every control away, so the rest of the row is the title's; the pill stays
+   in front of it. The controls close as one column: 0fr to 1fr animates where display cannot, and
    the title simply grows into the room as it opens. The negative margin takes
    back the header gap the empty column would still hold. Visibility follows
    at the end of the close, so hidden controls leave the tab order. */

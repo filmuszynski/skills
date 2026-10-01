@@ -151,7 +151,7 @@ import re as _re
 
 
 def _words(text):
-    return _re.findall(r"[0-9A-Za-zÀ-ɏ]+", text)
+    return _re.findall(r"\w+", text, _re.UNICODE)
 
 
 def _glance_words(raw):
@@ -165,8 +165,11 @@ def _glance_words(raw):
 def _header_words(raw):
     """The words of the header as written: after the title, before the first
     section, without the banner."""
-    head = raw.split("\n# ", 1)[-1] if not raw.startswith("# ") else raw[2:]
-    head = head.split("\n", 1)[1] if "\n" in head else ""
+    if raw.startswith("# ") or "\n# " in raw:
+        head = raw.split("\n# ", 1)[-1] if not raw.startswith("# ") else raw[2:]
+        head = head.split("\n", 1)[1] if "\n" in head else ""
+    else:
+        head = raw            # no title: the whole top of the file is header
     head = _re.split(r"\n(?:## |### Task )", "\n" + head, maxsplit=1)[0]
     lines, banner = [], False
     for line in head.split("\n"):
@@ -193,7 +196,40 @@ HEADERS = {
         "<!-- generated file -->\n\n# P\n\n> **For agentic workers:** use a skill.\n"
         "> Second banner line.\n\nA lead paragraph.\n\n**Goal:** g\nwrapped on\n2026. a date line\n\n"
         "A paragraph between the fields.\n\n**Repo:** r.\n\n---\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n"),
+    "no title": "**Goal:** g.\n**Repo:** r.\n\n## Context\n\nx\n",
+    "rule straight under a field": "# P\n\n**Goal:** a\n---\nmore\n\n**Repo:** b\n===\n\n## C\n\nx\n",
+    "mixed fences": ("# P\n\n**Goal:** g\n~~~\n```\n~~~\n\n````\n```\n**Not:** a field\n````\n\n"
+                     "**Repo:** r ünïcødé Ωμέγα 漢字\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n"),
 }
+
+
+@test
+def test_plan_header_structure_holds():
+    """Words in order are not enough: no field may turn into a heading, swallow a
+    section, or grow a field that is not one."""
+    import layout_plan
+    want = {"quote under a field": ["Request", "Where to look"],
+            "no title": ["Goal", "Repo"],
+            "rule straight under a field": ["Goal", "Repo"],
+            "mixed fences": ["Goal", "Repo"]}
+    for name, fields in want.items():
+        plan = layout_plan.parse(HEADERS[name])
+        assert list(plan["meta"]) == fields, (name, list(plan["meta"]))
+        html = layout_plan._meta_html(plan)
+        for cell in html.split("<td>")[1:]:
+            assert not _re.search(r"<h[1-6]", cell.split("</td>")[0]), (name, cell[:120])
+        assert plan["sections"], (name, "the first section survives")
+    mixed = layout_plan.parse(HEADERS["mixed fences"])
+    assert [s["num"] for s in mixed["sections"]] == ["Task 1"]
+    assert "**Not:** a field" in mixed["meta"]["Goal"], "a field line inside a fence is code"
+
+
+@test
+def test_plan_header_unclosed_fence_does_not_swallow_the_plan():
+    import layout_plan
+    plan = layout_plan.parse("# P\n\n**Goal:** g\n```\nhalf a block\n\n### Task 1: A\n\n- [ ] **Step 1: x**\n")
+    assert [s["num"] for s in plan["sections"]] == ["Task 1"], plan["sections"]
+    assert "half a block" in plan["meta"]["Goal"]
 
 
 @test
