@@ -2189,6 +2189,7 @@ def _finish_fn():
 def test_approve_and_decline_clear_a_stale_pending():
     import subprocess
     out = {}
+    posts = {}
     for kind in ("approve", "decline", "changes"):
         prog = _finish_fn() + """
         var D = {meta: {sourceMtime: 100}}, atSave = "unset";
@@ -2201,15 +2202,19 @@ def test_approve_and_decline_clear_a_stale_pending():
         function copyText(t, then) { then(false); }
         function persist() {}
         function openFinish() {}
-        function postDraft() {}
+        var posted = [];
+        function postDraft(a) { posted.push(a); }
         finish(%s);
-        process.stdout.write(JSON.stringify(atSave));
+        process.stdout.write(JSON.stringify({save: atSave, posted: posted}));
         """ % json.dumps(kind)
         r = subprocess.run(["node", "-e", prog], capture_output=True, timeout=30)
         assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
-        out[kind] = json.loads(r.stdout.decode("utf-8"))
+        res = json.loads(r.stdout.decode("utf-8"))
+        out[kind] = res["save"]
+        posts[kind] = res["posted"]
     assert out["approve"] is None and out["decline"] is None, out
     assert out["changes"] == {"sentAt": 1, "sourceMtime": 50}, "changes keeps it until the copy lands"
+    assert posts["approve"] == ["cancel"] and posts["decline"] == ["cancel"], posts
 
 
 def _fake_el(prev=False, current_kind=False, in_prev=False):

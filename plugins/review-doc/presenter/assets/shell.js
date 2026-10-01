@@ -2620,12 +2620,6 @@
     }
   }
 
-  /* One click finishes the review: it records the verdict, rebuilds the answer
-     so the verdict leads it, and copies. Pasting is the telling, so putting the
-     copy anywhere else was asking for two clicks to do one thing.
-
-     No toggling off. These act now, and a button that undoes itself on a second
-     press would copy an answer without the verdict you just chose. */
   /* The draft number in At a glance counts review rounds on the server's side
      (1.1.5), so every browser shows the same one. Fire and forget: a lost signal
      costs one draft number, never a review. A file:// page has no server. */
@@ -2641,6 +2635,12 @@
     }).catch(function () {});
   }
 
+  /* One click finishes the review: it records the verdict, rebuilds the answer
+     so the verdict leads it, and copies. Pasting is the telling, so putting the
+     copy anywhere else was asking for two clicks to do one thing.
+
+     No toggling off. These act now, and a button that undoes itself on a second
+     press would copy an answer without the verdict you just chose. */
   function finish(kind) {
     if (kind) {
       state.data.verdict = kind;

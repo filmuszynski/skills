@@ -6,6 +6,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-10-01
+
+### Added
+- Every document and plan page ends its At a glance box with Draft, Created and Last edited.
+  The draft number goes up once each time Claude answers a Request changes, and reads the same
+  in every browser: the page tells the review server, which keeps a small record per page in
+  `~/.review-doc/drafts/`. Cancel takes the round back. A page opened as `file://` stays at
+  Draft 1. On Linux, which records no creation time, the second row reads First reviewed.
+- A document without `**Key:**` lines gets an At a glance box with just these three rows.
+
 ## [1.1.4] - 2026-10-01
 
 ### Changed

@@ -118,7 +118,7 @@ note, and paste the answer back.
 - **No page after installing.** Type `/reload-plugins` or restart Claude Code.
 - **The link starts with `file://`.** All ports from 7777 to 7787 are taken, so no
   local server could start. The page still works; settings are then changed with
-  `/review-doc:settings`.
+  `/review-doc:settings`. The draft number in At a glance needs the server, so such a page stays at Draft 1.
 - **A page says it has expired.** Pages are kept for `stale-hours`. Ask Claude to
   review the file again to make a new one.
 - **Pages open in VS Code although you use another editor.** Cursor and some other

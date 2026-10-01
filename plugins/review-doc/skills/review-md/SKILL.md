@@ -35,6 +35,8 @@ plan page in a few ways:
   heading is an Intro block. A document with no headings renders as one block.
 - The same file always gets the same page and the same link.
 
+Every document and plan page ends its At a glance box with Draft, Created and Last edited. The draft number goes up once per Request changes that Claude answers; a page opened as a `file://` link stays at Draft 1.
+
 ## Plans render themselves
 
 A hook renders every `.md` file Claude writes or edits under a `.claude/plans/` folder,
