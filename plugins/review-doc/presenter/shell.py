@@ -180,7 +180,7 @@ def _credit_html(version):
     ver = (' <span class="credit-version">v.%s</span>' % _esc(version)) if version else ""
     parts = ['<span class="credit-seg">/review-doc skills' + ver + " by Filip Muszyński</span>",
              link.format(LICENSE_URL, "MIT License"),
-             link.format(REPO_URL, "GitHub&nbsp;&#8599;"),
+             link.format(REPO_URL, "GitHub"),
              '<button type="button" class="credit-seg credit-settings credit-tail" id="open-settings" '
              'aria-haspopup="dialog" data-tip="Settings for every review page">'
              '<svg class="credit-gear" viewBox="0 0 16 16" aria-hidden="true">'

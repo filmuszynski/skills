@@ -796,7 +796,9 @@ def test_section_headings_are_lettered_as_the_eyebrow():
                  "font-weight: 700;", "color: var(--accent-ink);"):
         assert decl in rule, decl
     assert '#doc .plain .sec[data-kind="task"] > h2[data-sec],' in css, "tasks keep the eyebrow blue"
-    assert ".plain .sec:has(> h2[data-sec], > h3[data-sec]) > .sec-tag {" in css,         "the heading shares the line of the tick and pencil"
+    assert (".plain .sec:has(> h2[data-sec], > h3[data-sec]) > .sec-tag,\n"
+            ".plain .sec.glance > .sec-tag {") in css, \
+        "the heading shares the line of the tick and pencil, in the At a glance box too"
     doc = css.split(chr(10) + "#doc {")[1].split("}")[0]
     assert "padding: 28px 20px 90px;" in doc, "a section frame keeps 20px from the edge"
     sub = css.split('.plain .sec[data-kind="sub"] {')[1].split("}")[0]
@@ -2120,6 +2122,10 @@ def test_scope_button_slides_in_from_nothing():
     assert "opacity: 0" in frm and "width: 0" in frm, kf
     assert "margin-left: calc(-1 * var(--ctl-gap, 14px))" in frm, "the gap closes too, so the switch slides"
     assert "--ctl-gap: 8px" in c, "the narrow header has the smaller gap"
+    to = kf[kf.index(" to "):]
+    assert "margin-left: calc(var(--counter-gap, 5px) - var(--ctl-gap, 14px))" in to, kf
+    assert ".counters { display: flex; gap: var(--counter-gap, 5px); }" in c
+    assert "margin-left: calc(var(--counter-gap) - var(--ctl-gap));" in c, "it sits at the counters' gap"
     rm = c[c.index("#cycle-scope.is-new { animation: scope-in"):]
     rm = rm[rm.index("@media (prefers-reduced-motion: reduce)"):]
     assert "#cycle-scope.is-new { animation: none; }" in rm[:200]

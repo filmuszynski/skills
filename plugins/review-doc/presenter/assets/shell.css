@@ -168,14 +168,16 @@ header > .doc-title { flex-shrink: 1; }
 }
 
 /* The counters are also the navigation, so they have to read as buttons. */
-.counters { display: flex; gap: 5px; }
+.counters { display: flex; gap: var(--counter-gap, 5px); }
 /* The scope toggle, right of the counters: three icons in one box, only the
    current one opaque, so a click cross-fades instead of swapping. It fades in
    the first time a page has an earlier round, growing from no width and taking
    back the row gap in front of it as it goes, so the mode switch slides over
-   instead of jumping. */
-.controls { --ctl-gap: 14px; }
-#cycle-scope { position: relative; width: 30px; padding: 0; display: inline-grid; place-items: center; }
+   instead of jumping. It stands as close to the counters as they stand to each
+   other: the negative margin takes the row gap back down to the counters' gap. */
+.controls { --ctl-gap: 14px; --counter-gap: 5px; }
+#cycle-scope { position: relative; width: 30px; padding: 0; display: inline-grid; place-items: center;
+               margin-left: calc(var(--counter-gap) - var(--ctl-gap)); }
 /* No frame either: the icon is drawn in the edit orange, the colour of the
    current round's marks, and hover lays the same orange plate as the edit
    counter. The id beats .iconbtn, so its border and hover need no !important. */
@@ -191,7 +193,7 @@ header > .doc-title { flex-shrink: 1; }
 #cycle-scope[data-scope="all"] .sc-all { opacity: 1; }
 @keyframes scope-in {
   from { opacity: 0; width: 0; margin-left: calc(-1 * var(--ctl-gap, 14px)); }
-  to { opacity: 1; width: 30px; margin-left: 0; }
+  to { opacity: 1; width: 30px; margin-left: calc(var(--counter-gap, 5px) - var(--ctl-gap, 14px)); }
 }
 @media (prefers-reduced-motion: reduce) {
   #cycle-scope.is-new { animation: none; }
@@ -648,8 +650,14 @@ main { min-height: 0; }
 .sec[data-sec="__meta"] td > :last-child { margin-bottom: 0; }
 .sec.glance .glance-notes { margin-bottom: .9em; }
 .sec.glance .glance-notes > :first-child { margin-top: 0; }
-.sec.glance td > :first-child { margin-top: 0; }
-.sec.glance td > :last-child { margin-bottom: 0; }
+/* A document's cell holds a paragraph, and `#doc p` gives it a bottom margin
+   that outweighs a class rule, which left an empty strip under every value.
+   The #doc prefix wins it back. The text then sits in the middle of its cell,
+   in plans too, with a little less padding than an ordinary table. */
+#doc .sec.glance td > :first-child, #doc .sec[data-sec="__meta"] td > :first-child { margin-top: 0; }
+#doc .sec.glance td > :last-child, #doc .sec[data-sec="__meta"] td > :last-child { margin-bottom: 0; }
+#doc .sec.glance th, #doc .sec.glance td,
+#doc .sec[data-sec="__meta"] th, #doc .sec[data-sec="__meta"] td { vertical-align: middle; padding-top: .36em; padding-bottom: .36em; }
 .sec-tools { margin-left: auto; display: flex; gap: calc(15px * var(--zoom, 1) * .37); align-items: center; }
 
 /* The controls stay quiet until the section is hovered or a decision is on
@@ -691,8 +699,11 @@ main { min-height: 0; }
 /* The heading sits where the eyebrow sat, on the line of the tick and the
    pencil, so their row is lifted out of the flow and pinned top right. Only
    when the block has a heading: an intro's tools would otherwise sit on top
-   of its first line. */
-.plain .sec:has(> h2[data-sec], > h3[data-sec]) > .sec-tag {
+   of its first line. The At a glance box's heading carries no data-sec (its
+   block is the intro's), so it is named here as well, or its ✎ and ? would
+   stand on a row of their own above "At a glance". */
+.plain .sec:has(> h2[data-sec], > h3[data-sec]) > .sec-tag,
+.plain .sec.glance > .sec-tag {
   position: absolute;
   top: .91em;
   right: 1.73em;

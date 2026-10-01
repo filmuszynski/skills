@@ -6,6 +6,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-10-01
+
+### Changed
+- The round button stands as close to the counters as the counters stand to each other.
+
+### Fixed
+- In a document's At a glance box, the ✎ and ? buttons sit on the "At a glance" line like
+  every other section's, instead of on a row of their own above it.
+- The GitHub part of the credit line drops its ↗ arrow.
+- The At a glance table's cells are lower and their text sits in the middle. A document's
+  cell kept an empty strip under its text, because the paragraph margin was never reset.
+
 ## [1.1.3] - 2026-10-01
 
 ### Changed

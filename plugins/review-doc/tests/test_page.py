@@ -227,6 +227,16 @@ def test_glance_blocks_sit_tight_in_their_cells():
 
 
 @test
+def test_glance_cells_centre_their_text():
+    c = css()
+    # `#doc p` carries a bottom margin at (1,0,1); without the #doc prefix the
+    # document box's paragraphs kept it and every cell had an empty strip.
+    assert "#doc .sec.glance td > :last-child, #doc .sec[data-sec=\"__meta\"] td > :last-child { margin-bottom: 0; }" in c
+    rule = c.split("#doc .sec[data-sec=\"__meta\"] th, #doc .sec[data-sec=\"__meta\"] td {", 1)[1].split("}", 1)[0]
+    assert "vertical-align: middle;" in rule, rule
+
+
+@test
 def test_tooltips_can_be_switched_off():
     src = js()
     show = src.split("function showTip(el) {", 1)[1][:200]
