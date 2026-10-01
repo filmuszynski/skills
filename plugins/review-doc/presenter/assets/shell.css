@@ -390,6 +390,7 @@ main { min-height: 0; }
   border-top: 1px solid var(--line-soft);
   font-size: .8em;
   color: var(--label);
+  text-align: center;
   user-select: none;
 }
 #doc .credit a {

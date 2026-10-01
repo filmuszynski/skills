@@ -56,8 +56,9 @@ def test_credit_line_closes_the_document():
     assert html.rfind("data-sec=", 0, end) < at, "after the last section"
     c = credit(html)
     text = htmllib.unescape(re.sub(r"<[^>]+>", "", c))
-    for part in ("/review-doc skill by Filip Muszynski", "MIT License", "v9.8.7", "GitHub", "Settings"):
+    for part in ("/review-doc skill by Filip Muszyński", "MIT License", "v9.8.7", "GitHub", "Settings"):
         assert part in text, part
+    assert "Muszynski" not in text, "the name is spelled with ń"
     assert 'href="https://github.com/filmuszynski"' in c
     assert 'href="%s"' % shell.LICENSE_URL in c and 'href="%s"' % shell.REPO_URL in c
     assert 'id="open-settings"' in c
@@ -182,6 +183,13 @@ def test_credit_line_sits_on_the_text_column():
     assert "font-size: .8em" in rule
     assert "max-width: calc(57.3em / .8)" in rule
     assert "calc(1.73em / .8)" in rule
+
+
+@test
+def test_credit_line_is_centred():
+    rule = css().split("#doc .credit {", 1)[1].split("}", 1)[0]
+    assert "text-align: center" in rule
+    assert "max-width: calc(57.3em / .8)" in rule, "still on the text column"
 
 
 @test

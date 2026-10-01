@@ -152,7 +152,7 @@ def _credit_html(version):
     """
     sep = '<span class="credit-sep" aria-hidden="true">·</span>'
     link = '<a href="{0}" target="_blank" rel="noopener">{1}</a>'
-    parts = ["/review-doc skill by " + link.format(AUTHOR_URL, "Filip Muszynski"),
+    parts = ["/review-doc skill by " + link.format(AUTHOR_URL, "Filip Muszyński"),
              link.format(LICENSE_URL, "MIT License")]
     if version:
         parts.append('<span class="credit-version">v%s</span>' % _esc(version))
