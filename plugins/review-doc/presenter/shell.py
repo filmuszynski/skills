@@ -60,6 +60,12 @@ __CSS__
   <span class="doc-title">__SHORT__</span>
   <div class="spacer"></div>
   <div class="controls-slot"><div class="controls">
+  <button class="iconbtn scope-btn" id="cycle-scope" type="button" hidden data-scope="current"
+          data-tip="Stepping through this round" aria-label="Stepping through this round, click to change">
+    <svg class="ico sc-current" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/></svg>
+    <svg class="ico sc-previous" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/><circle cx="8" cy="8" r="5.6"/></svg>
+    <svg class="ico sc-all" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.2" cy="8" r="4"/><circle cx="9.8" cy="8" r="4"/></svg>
+  </button>
   <div class="counters" role="group" aria-label="Jump through your feedback">
     <button class="counter" data-kind="comments" type="button" disabled><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h10a1.2 1.2 0 0 1 1.2 1.2v5.1a1.2 1.2 0 0 1-1.2 1.2H7.2L4.4 13.4V11H3a1.2 1.2 0 0 1-1.2-1.2V4.7A1.2 1.2 0 0 1 3 3.5z"/></svg><span class="num">0</span></button>
     <button class="counter" data-kind="edits" type="button" disabled><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.6 2.6l2.8 2.8-7.9 7.9H2.7v-2.8z"/><path d="M9.1 4.1l2.8 2.8"/></svg><span class="num">0</span></button>

@@ -171,6 +171,7 @@
            toggle only lasts for the visit. The verdict buttons copy the answer
            whether it shows or not. */
         if (typeof got.ui.zoom === "number") state.ui.zoom = got.ui.zoom;
+        if (SCOPES.indexOf(got.ui.scope) >= 0) state.ui.scope = got.ui.scope;
       }
       pruneSteps();
     } catch (e) { /* corrupt payload: start clean rather than fail to open */ }
@@ -191,6 +192,57 @@
   }
 
   function hasRounds() { return !!(state.data.rounds && state.data.rounds.length); }
+
+  /* What the counters step through. The page always shows every round; this
+     only chooses which of them the three counters count and visit. */
+  var SCOPES = ["current", "previous", "all"];
+  var SCOPE_TIPS = {
+    current: "Stepping through this round",
+    previous: "Stepping through earlier rounds",
+    all: "Stepping through every round"
+  };
+
+  function nextScope(s) {
+    var i = SCOPES.indexOf(s);
+    return SCOPES[(i + 1) % SCOPES.length] || "current";
+  }
+
+  function scopeNow() { return hasRounds() ? (state.ui.scope || "current") : "current"; }
+
+  /* Earlier marks nest inside current ones and the other way round, so an
+     ancestor cannot decide. The element itself does: an earlier mark carries
+     data-prev, and a current mark, table or decided section is current even
+     when it sits inside an earlier mark. Only an element that is neither
+     falls back on its ancestors. */
+  function isEarlier(el) {
+    if (el.hasAttribute("data-prev")) return true;
+    if (el.matches && el.matches("mark.has-comment, mark.edited, mark.tbl-orphan, table[data-tchg], .chg-whole, .sec, .step")) return false;
+    return !!(el.closest && el.closest("[data-prev]"));
+  }
+
+  function inScope(el) {
+    var s = scopeNow();
+    return s === "all" || (s === "previous") === isEarlier(el);
+  }
+
+  function paintScope() {
+    var b = doc.getElementById("cycle-scope");
+    if (!b) return;
+    var s = scopeNow();
+    b.hidden = !hasRounds();
+    b.setAttribute("data-scope", s);
+    b.setAttribute("data-tip", SCOPE_TIPS[s]);
+    b.setAttribute("aria-label", SCOPE_TIPS[s] + ", click to change");
+  }
+
+  function onScope() {
+    state.ui.scope = nextScope(scopeNow());
+    navAt = { comments: -1, edits: -1, all: -1 };
+    paintScope();
+    persist();
+    updateCounters();
+    flash(SCOPE_TIPS[state.ui.scope], "", 1800);
+  }
 
   /* ------------------------------------------------------------------ undo */
 
@@ -2247,36 +2299,43 @@
 
   function navTargets(kind) {
     /* A comment across two paragraphs is several marks with one id. It is
-       still one comment, so only its first piece is a stop. */
+       still one comment, so only its first piece is a stop. An earlier comment
+       does the same under data-prev. */
     var seenMark = {};
     function firstPiece(el) {
-      var mid = el.getAttribute && el.getAttribute("data-mark");
+      var mid = el.getAttribute && (el.getAttribute("data-mark") || el.getAttribute("data-prev"));
       if (!mid) return true;
       if (seenMark[mid]) return false;
       seenMark[mid] = true;
       return true;
     }
-    if (kind === "comments") return [].slice.call(docEl.querySelectorAll("mark.has-comment")).filter(firstPiece);
+    if (kind === "comments") {
+      return [].slice.call(docEl.querySelectorAll("mark.has-comment, mark.prev-comment, mark.prev-pill[data-label='comment']"))
+        .filter(inScope).filter(firstPiece);
+    }
     if (kind === "edits") {
       /* Every changed run is its own stop. Grouping by element meant a second
          change in the same paragraph could never be reached, and the jump
          landed on the paragraph rather than on what you changed. querySelectorAll
          returns document order, so the cycle reads top to bottom. */
-      return [].slice.call(docEl.querySelectorAll("mark.edited, .chg-whole, table[data-tchg], mark.tbl-orphan"))
-        .filter(function (el) { return !cellLocked(el.closest("td, th")); });
+      return [].slice.call(docEl.querySelectorAll(
+        "mark.edited, .chg-whole, table[data-tchg], mark.tbl-orphan, mark.prev-edit, mark.prev-pill:not([data-label='comment'])"
+      )).filter(inScope).filter(function (el) { return !cellLocked(el.closest("td, th")); });
     }
     /* Everything with a place in the document, in document order. The note on
        the whole plan is counted but has nowhere to jump to. */
     return [].slice.call(docEl.querySelectorAll(
       'mark.has-comment, mark.edited, table[data-tchg], mark.tbl-orphan, .chg-whole, .sec[data-decision="ok"], ' +
-      '.sec[data-decision="skip"], .step[data-decision="ok"], .step[data-decision="skip"]'
-    )).filter(firstPiece).filter(function (el) {
+      '.sec[data-decision="skip"], .step[data-decision="ok"], .step[data-decision="skip"], ' +
+      "mark.prev-comment, mark.prev-edit, mark.prev-pill"
+    )).filter(inScope).filter(firstPiece).filter(function (el) {
       return !cellLocked(el.closest ? el.closest("td, th") : null);
     }).filter(function (el, i, all) {
       /* A decided section already contains its decided steps and marks; keep
-         the outermost one so one click is one stop. */
+         the outermost one so one click is one stop. Only within one round: an
+         earlier mark around a current one does not hide it. */
       for (var j = 0; j < all.length; j++) {
-        if (all[j] !== el && all[j].contains(el)) return false;
+        if (all[j] !== el && all[j].contains(el) && isEarlier(all[j]) === isEarlier(el)) return false;
       }
       return true;
     });
@@ -2347,8 +2406,9 @@
     /* A comment over mixed weights is one mark per text node (see wrapRange),
        so the stop is only its first piece. Every piece pulses, or a comment
        that starts in bold lights up its bold half alone. */
-    var mid = el.getAttribute("data-mark");
-    var all = mid ? docEl.querySelectorAll('mark.has-comment[data-mark="' + cssEsc(mid) + '"]') : [el];
+    var mid = el.getAttribute("data-mark"), pid = el.getAttribute("data-prev");
+    var all = mid ? docEl.querySelectorAll('mark.has-comment[data-mark="' + cssEsc(mid) + '"]') :
+      pid ? docEl.querySelectorAll('[data-prev="' + cssEsc(pid) + '"]') : [el];
     for (var j = 0; j < all.length; j++) all[j].classList.add("is-target");
     setTimeout(function () {
       for (var k = 0; k < all.length; k++) all[k].classList.remove("is-target");
@@ -2370,11 +2430,22 @@
   function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
 
   function updateCounters() {
+    paintScope();
     var counts = {
       comments: Object.keys(state.data.marks).length,
       edits: totalEditRuns() + tableChangeCount(),
       all: feedbackCount()
     };
+    if (scopeNow() !== "current") {
+      /* The same lists the clicks walk, so a number is never more than the
+         stops behind it. Every round adds the current round's whole count,
+         because feedback without a place in the page still belongs to it. */
+      counts.comments = navTargets("comments").length;
+      counts.edits = navTargets("edits").length;
+      counts.all = scopeNow() === "all"
+        ? feedbackCount() + navTargets("all").filter(isEarlier).length
+        : navTargets("all").length;
+    }
     var btns = doc.querySelectorAll(".counter");
     for (var i = 0; i < btns.length; i++) {
       var kind = btns[i].getAttribute("data-kind");
@@ -3129,6 +3200,7 @@
       });
     }
 
+    bind("cycle-scope", onScope);
     bind("undo", undo);
     bind("redo", redo);
     bind("reset", onReset);

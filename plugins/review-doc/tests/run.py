@@ -603,7 +603,7 @@ def test_edits_are_counted_and_navigated_per_run():
     # A restructured table counts as one more change and one more stop.
     assert "edits: totalEditRuns() + tableChangeCount()," in js, "the counter must count changes, not entries"
     assert "totalEditRuns() + tableChangeCount();" in js
-    assert 'docEl.querySelectorAll("mark.edited, .chg-whole, table[data-tchg], mark.tbl-orphan")' in js, \
+    assert '"mark.edited, .chg-whole, table[data-tchg], mark.tbl-orphan, mark.prev-edit' in js, \
         "every run is its own stop, in document order"
     assert "var seen = {}, out = [];" not in js, "the group-by-element dedupe is gone"
     # the prompt still reports per element, because applying needs the paragraph
@@ -774,7 +774,7 @@ def test_panels_stay_one_row_and_counters_are_symbols():
     html = shell.render(**sample())
     assert "<header>" in html, "the header no longer follows the scroll"
     for kind in ("comments", "edits", "all"):
-        chip = html.split('data-kind="%s"' % kind, 1)[1].split("</button>", 1)[0]
+        chip = html.split('<button class="counter" data-kind="%s"' % kind, 1)[1].split("</button>", 1)[0]
         assert '<svg class="ico"' in chip and '<span class="num">0</span>' in chip, kind
     assert ' title="' not in html.split("<main>")[0], "no browser tooltips in the header"
     css = io.open(os.path.join(PRESENTER, "assets", "shell.css"), encoding="utf-8").read()
@@ -1992,6 +1992,70 @@ def test_earlier_edits_claim_per_round_and_never_break_painting():
     c = shell._asset("shell.css")
     assert "mark.prev-comment" in c and "mark.prev-edit" in c
     assert "mark.has-comment mark.prev-comment" in c and "mark.edited mark.prev-edit" in c
+
+
+SCOPE_PRELUDE = 'var SCOPES = ["current", "previous", "all"];'
+
+
+@test
+def test_scope_steps_current_previous_all():
+    out = run_js(["nextScope"], '[nextScope("current"), nextScope("previous"), nextScope("all"), nextScope("x")]',
+                 SCOPE_PRELUDE)
+    assert out == ["previous", "all", "current", "current"], out
+
+
+@test
+def test_scope_button_markup_and_behaviour():
+    html = shell.render(**__import__("layout_doc").build("# T\n\n## A\n\nx\n", source="/x/t.md"))
+    head = html[html.index("<header>"):html.index("</header>")]
+    assert head.index('id="cycle-scope"') < head.index('class="counters"')
+    assert "hidden" in head[head.index('id="cycle-scope"') - 120:head.index('id="cycle-scope"') + 200]
+    src = shell._asset("shell.js")
+    for tip in ("Stepping through this round", "Stepping through earlier rounds", "Stepping through every round"):
+        assert tip in src
+    nt = fn_body_run(src, "navTargets")
+    assert "filter(inScope)" in nt and "data-prev" in nt
+    assert "state.ui.scope" in fn_body_run(src, "load")
+    assert 'bind("cycle-scope", onScope)' in src
+    assert "paintScope()" in fn_body_run(src, "updateCounters")
+    assert "data-prev" in fn_body_run(src, "pulse")
+    c = shell._asset("shell.css")
+    assert "#cycle-scope" in c and ".counter, .modes, header .iconbtn { height: 26px; }" in c
+
+
+def _fake_el(prev=False, current_kind=False, in_prev=False):
+    return ("{hasAttribute: function (a) { return a === 'data-prev' && %s; },"
+            " matches: function () { return %s; },"
+            " closest: function (s) { return %s ? {} : null; }}"
+            % (str(prev).lower(), str(current_kind).lower(), str(in_prev).lower()))
+
+
+@test
+def test_in_scope_classifies_the_element_itself_first():
+    names = ["isEarlier", "inScope"]
+    pre = SCOPE_PRELUDE + "var scope = 'current'; function scopeNow() { return scope; }"
+    earlier = _fake_el(prev=True)
+    current = _fake_el()
+    # A current mark nested inside an earlier mark is still current.
+    nested = _fake_el(current_kind=True, in_prev=True)
+    # An unknown element inside an earlier mark counts as earlier.
+    inside = _fake_el(in_prev=True)
+    expr = ("[%(s)s]" % {"s": ", ".join(
+        "(scope = '%s', [inScope(%s), inScope(%s), inScope(%s), inScope(%s)])" % (sc, earlier, current, nested, inside)
+        for sc in ("current", "previous", "all"))})
+    out = run_js(names, expr, pre)
+    assert out[0] == [False, True, True, False], out[0]
+    assert out[1] == [True, False, False, True], out[1]
+    assert out[2] == [True, True, True, True], out[2]
+
+
+@test
+def test_pulse_lights_every_piece_of_one_earlier_comment():
+    src = shell._asset("shell.js")
+    body = fn_body_run(src, "pulse")
+    assert "data-prev" in body and "[data-prev=" in body
+    nt = fn_body_run(src, "navTargets")
+    assert 'getAttribute("data-prev")' in nt, "firstPiece dedupes earlier pieces by data-prev"
 
 
 def main():
