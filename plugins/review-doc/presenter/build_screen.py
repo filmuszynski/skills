@@ -27,6 +27,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import drafts  # noqa: E402
 import layout_doc  # noqa: E402
 import layout_plan  # noqa: E402
 import layout_screen  # noqa: E402
@@ -114,16 +115,24 @@ def build(kind, md_path, slug=None, out_dir=None):
         raise Disabled(sw)
     raw = _read(md_path)
     source = os.path.abspath(md_path).replace("\\", "/")
-    built = LAYOUTS[kind].build(
-        raw,
-        source=source,
-        slug=slug or default_slug(kind, md_path),
-        generated_at=datetime.datetime.now().replace(microsecond=0).isoformat(),
-    )
+    slug = slug or default_slug(kind, md_path)
     # The source's own time, in epoch milliseconds so no time zone can skew the
     # comparison. The page asks the server for the current value and shows a
     # banner when it has moved on; the server rebuilds a page whose source did.
-    built["meta"]["sourceMtime"] = int(os.path.getmtime(md_path) * 1000)
+    source_mtime = int(os.path.getmtime(md_path) * 1000)
+    extra = {}
+    if kind in ("plan", "doc"):
+        # Draft, Created, Last edited (1.1.5). The record counts a round once its
+        # request meets a newer source; see drafts.py.
+        extra["facts"] = drafts.facts(drafts.on_build(slug, source_mtime), md_path, source_mtime)
+    built = LAYOUTS[kind].build(
+        raw,
+        source=source,
+        slug=slug,
+        generated_at=datetime.datetime.now().replace(microsecond=0).isoformat(),
+        **extra
+    )
+    built["meta"]["sourceMtime"] = source_mtime
     built["meta"]["version"] = paths.version()
     html = shell.render(**built)
     folder = os.path.realpath(out_dir or paths.pages_dir())

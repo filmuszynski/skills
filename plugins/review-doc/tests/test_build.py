@@ -264,3 +264,52 @@ def test_cli_output_survives_a_pipe_outside_the_code_page():
                        stdin=subprocess.DEVNULL, capture_output=True, timeout=60)
     assert r.returncode == 1, r.stderr.decode("utf-8", "replace")[-300:]
     assert json.loads(r.stdout.decode("ascii"))["ok"] is False
+
+
+def fixture_path_for_choice(h):
+    p = os.path.join(h, "pick.md")
+    with io.open(p, "w", encoding="utf-8", newline="") as fh:
+        fh.write("# Pick one\n\n## Option A\n\nFirst.\n\n## Option B\n\nSecond.\n")
+    return p
+
+
+@test
+def test_doc_and_plan_pages_carry_the_facts():
+    h = use_home(new_home())
+    src = os.path.join(h, "note.md")
+    with io.open(src, "w", encoding="utf-8", newline="") as fh:
+        fh.write("# Note\n\n## One\n\nText.\n")
+    res = build_screen.build("doc", src, out_dir=os.path.join(h, "out"))
+    html = io.open(res["path"], encoding="utf-8").read()
+    assert '<tr class="glance-fact"><th>Draft</th><td>1</td></tr>' in html
+    assert "<th>Last edited</th>" in html
+    assert os.path.isfile(os.path.join(h, "drafts", res["slug"] + ".json")), "--out still keeps the record at home"
+    plan = os.path.join(h, "plan.md")
+    with io.open(plan, "w", encoding="utf-8", newline="") as fh:
+        fh.write("# Plan\n\n## Task 1: t\n\nx\n")
+    html = io.open(build_screen.build("plan", plan, out_dir=os.path.join(h, "out"))["path"], encoding="utf-8").read()
+    assert '<tr class="glance-fact"><th>Draft</th><td>1</td></tr>' in html
+
+
+@test
+def test_a_requested_round_shows_as_draft_two_after_the_edit():
+    import drafts
+    h = use_home(new_home())
+    src = os.path.join(h, "note.md")
+    with io.open(src, "w", encoding="utf-8", newline="") as fh:
+        fh.write("# Note\n\nText.\n")
+    res = build_screen.build("doc", src, out_dir=os.path.join(h, "out"))
+    drafts.request(res["slug"], int(os.path.getmtime(src) * 1000))
+    later = os.path.getmtime(src) + 5
+    os.utime(src, (later, later))
+    html = io.open(build_screen.build("doc", src, out_dir=os.path.join(h, "out"))["path"], encoding="utf-8").read()
+    assert '<th>Draft</th><td>2</td>' in html
+
+
+@test
+def test_choice_screens_get_no_facts():
+    h = use_home(new_home())
+    src = fixture_path_for_choice(h)
+    html = io.open(build_screen.build("screen", src, out_dir=os.path.join(h, "out"))["path"], encoding="utf-8").read()
+    assert "glance-fact" not in html
+    assert not os.path.isdir(os.path.join(h, "drafts"))

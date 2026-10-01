@@ -62,3 +62,15 @@ def test_big_log_is_started_afresh():
         fh.write("x" * (2 * 1000 * 1000))
     with serving(h):
         assert os.path.getsize(os.path.join(h, "server.log")) < 1000
+
+
+@test
+def test_page_prune_also_prunes_orphan_records():
+    import drafts
+    import pages
+    h = new_home()
+    drafts.on_build("orphan", 1, home=h, now_ms=1)
+    old = time.time() - (drafts.KEEP_DAYS + 1) * 86400
+    os.utime(os.path.join(h, "drafts", "orphan.json"), (old, old))
+    pages.prune(home=h, hours=96)
+    assert not os.path.exists(os.path.join(h, "drafts", "orphan.json"))

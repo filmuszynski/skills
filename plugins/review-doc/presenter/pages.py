@@ -6,6 +6,7 @@ import os
 import re
 import time
 
+import drafts
 import paths
 import settings
 
@@ -20,7 +21,7 @@ def prune(home=None, now=None, hours=None):
     try:
         names = os.listdir(d)
     except OSError:
-        return 0
+        names = []  # no pages folder yet: records may still be due
     for n in names:
         if not n.lower().endswith(".html"):
             continue
@@ -31,6 +32,7 @@ def prune(home=None, now=None, hours=None):
                 gone += 1
         except OSError:
             pass  # in use or already gone: the next run gets it
+    drafts.prune(home)  # records outlive their page by KEEP_DAYS, then go too
     return gone
 
 
