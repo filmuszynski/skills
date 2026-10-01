@@ -11,7 +11,7 @@ A coloured warning line in Claude Code when a session's context window fills up.
 From 30%, the line for the current level shows on every prompt you send, for example:
 
 ```
-🟠 Context at 43% (430k of 1000k tokens): start planning a handoff
+🟠 Context at 43% (430k of 1M tokens): start planning a handoff
 ```
 
 During tool calls it appears only when a new level is crossed, so a long run still
@@ -44,6 +44,8 @@ environment Claude Code starts from.
 - **"Hook error" on every prompt:** neither `python3` nor `python` runs in that shell.
   Install Python 3.10+ or put it on the PATH. On macOS without the Command Line Tools,
   `/usr/bin/python3` may ask to install them each time; install them once.
+- **No line in a session that was already open when you installed the plugin:** type
+  `/reload-plugins` there. `/clear` starts a fresh transcript but does not load new plugins.
 - **Two lines per prompt:** an older copy of the hook is still wired up in your own
   `settings.json`. Remove that entry.
 

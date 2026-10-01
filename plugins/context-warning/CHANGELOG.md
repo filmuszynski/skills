@@ -6,6 +6,13 @@ All notable changes to the context-warning plugin. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-01
+
+### Changed
+- A 1M window is shown as `1M` instead of `1000k`, e.g. `(430k of 1M tokens)`.
+- README: sessions that were already open when the plugin was installed need
+  `/reload-plugins`; `/clear` does not load it.
+
 ## [1.0.0] - 2026-10-01
 
 First public release.

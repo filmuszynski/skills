@@ -101,7 +101,7 @@ def test_30_repeats_on_every_prompt_with_one_note():
     b.model()
     b.usage(350000)
     first = b.run()
-    assert "\U0001F7E1 Context at 35% (350k of 1000k tokens): fine for now" in line(first)
+    assert "\U0001F7E1 Context at 35% (350k of 1M tokens): fine for now" in line(first)
     assert line(first).startswith("\n\x1b[92m") and line(first).endswith("\x1b[0m")
     assert first["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert "keep an eye on it" in first["hookSpecificOutput"]["additionalContext"]
@@ -205,7 +205,7 @@ def test_model_switch_overrides_cached_window():
     b = Box()
     b.model()
     b.usage(350000)
-    assert "of 1000k" in line(b.run())
+    assert "of 1M" in line(b.run())
     b.plain_model()
     b.usage(70000)
     assert "of 200k" in line(b.run())
@@ -216,7 +216,7 @@ def test_usage_above_window_assumes_1m():
     b = Box()
     b.plain_model()
     b.usage(300000)
-    assert "(300k of 1000k tokens)" in line(b.run())
+    assert "(300k of 1M tokens)" in line(b.run())
 
 
 @test
@@ -318,7 +318,7 @@ def test_model_found_outside_a_large_tail():
     with io.open(b.transcript, "a", encoding="utf-8") as fh:
         fh.write((filler + "\n") * 2600)  # about 2.6 MB, past the 2 MB tail
     b.usage(350000)
-    assert "of 1000k" in line(b.run())
+    assert "of 1M" in line(b.run())
     names = os.listdir(b.state_dir())
     with io.open(os.path.join(b.state_dir(), names[0]), encoding="utf-8") as fh:
         assert json.load(fh)["window"] == 1000000, "window cached after one full scan"

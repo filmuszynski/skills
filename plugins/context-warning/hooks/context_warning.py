@@ -177,8 +177,9 @@ def main(raw):
         return None
 
     level, icon, colour, text = hit
-    plain = "%s Context at %d%% (%dk of %dk tokens): %s" % (
-        icon, int(pct + 0.5), int(used / 1000.0 + 0.5), win // 1000, text)
+    size = "%dM" % (win // 1000000) if win % 1000000 == 0 else "%dk" % (win // 1000)
+    plain = "%s Context at %d%% (%dk of %s tokens): %s" % (
+        icon, int(pct + 0.5), int(used / 1000.0 + 0.5), size, text)
     out = {"systemMessage": "\n" + colour + plain + RESET}
     if note:
         out["hookSpecificOutput"] = {"hookEventName": event,
