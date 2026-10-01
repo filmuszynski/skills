@@ -17,9 +17,11 @@ FIX = os.path.join(HERE, "fixtures")
 SLUG = "multi-1a2b3c"
 
 
-def html_page(home, slug, root, entry="index.html", kind="html"):
+def html_page(home, slug, root, entry="index.html", kind="html", source_mtime=None):
     """A page in pages/ as build_screen writes one, reduced to what the frame reads."""
     meta = {"slug": slug, "kind": kind, "target": {"type": "file", "root": root, "entry": entry}}
+    if source_mtime is not None:
+        meta["sourceMtime"] = source_mtime
     text = "<script>\nwindow.PRESENTER_DATA = %s;\n</script>\n" % shell._json_literal({"meta": meta})
     shell.write(os.path.join(home, "pages", slug + ".html"), text)
     return slug
@@ -123,10 +125,49 @@ def test_frame_listens_on_ipv6_loopback_when_there_is_one():
 @test
 def test_frame_requests_count_as_activity():
     h = new_home()
+    html_page(h, SLUG, plain_site(h))
     with serving(h) as srv:
         srv.last_request = 0
-        frame_request(srv, "GET", "/", host="evil.example:1")
+        assert frame_request(srv, "GET", "/", host="evil.example:1")[0] == 403
+        assert frame_request(srv, "GET", "/", "nosuch-1a2b3c")[0] == 403
+        assert srv.last_request == 0, "a refused request from any web page keeps nothing alive"
+        assert frame_request(srv, "GET", "/", SLUG)[0] == 200
         assert srv.last_request > 0
+
+
+@test
+def test_frame_moves_on_when_ipv6_frame_port_is_taken():
+    try:
+        probe = socket.socket(socket.AF_INET6)
+        probe.bind(("::1", 0))
+        probe.close()
+    except OSError as exc:
+        print("  (skip) no IPv6 loopback here: %s" % exc)
+        return
+    while True:
+        a = socket.socket()
+        a.bind(("127.0.0.1", 0))
+        p = a.getsockname()[1]
+        a.close()
+        if p <= 65000:
+            break
+    blocker = socket.socket(socket.AF_INET6)
+    try:
+        blocker.bind(("::1", p + 100))
+        blocker.listen(1)
+    except OSError:
+        pass  # taken already, which is what the test needs
+    try:
+        h = new_home()
+        with serving(h, ports=[p, 0]) as srv:
+            assert srv.port != p and srv.frame_port == srv.port + 100, (p, srv.port, srv.frame_port)
+        # Both IPv4 sockets on p and p + 100 were given back.
+        for port in (p, p + 100):
+            s = socket.socket()
+            s.bind(("127.0.0.1", port))
+            s.close()
+    finally:
+        blocker.close()
 
 
 @test
@@ -230,6 +271,44 @@ def test_entry_with_a_space_and_head_requests():
 
 
 @test
+def test_a_folder_without_its_slash_is_redirected():
+    h = new_home()
+    root = site(h)
+    html_page(h, SLUG, root)
+    _write(os.path.join(root, "sub", "index.html"), "<p>sub</p>")
+    _write(os.path.join(root, ".git", "index.html"), "<p>git</p>")
+    _write(os.path.join(root, "empty", "x.css"), "b{}")
+    with serving(h) as srv:
+        status, hd, _ = frame_request(srv, "GET", "/sub", SLUG)
+        assert status == 301 and hd["location"] == "/sub/", (status, hd)
+        status, hd, _ = frame_request(srv, "GET", "/sub?x=1", SLUG)
+        assert status == 301 and hd["location"] == "/sub/?x=1", (status, hd)
+        status, _, data = frame_request(srv, "GET", "/sub/", SLUG)
+        assert status == 200 and b"<p>sub</p>" in data
+        # A redirect never confirms what the frame would refuse.
+        for p in ("/.git", "/empty", "/missing", "/css/site.css/"):
+            assert frame_request(srv, "GET", p, SLUG)[0] == 404, p
+
+
+@test
+def test_frame_responses_carry_corp_and_html_gets_frame_ancestors():
+    h = new_home()
+    root = site(h)
+    html_page(h, SLUG, root)
+    with serving(h) as srv:
+        want = "frame-ancestors http://127.0.0.1:%d http://localhost:%d" % (srv.port, srv.port)
+        for p in ("/", "/index.html", "/css/site.css", "/__review-doc/probe.js", "/missing.html"):
+            status, hd, _ = frame_request(srv, "GET", p, SLUG)
+            assert hd.get("cross-origin-resource-policy") == "same-origin", (p, status, hd)
+            if p in ("/", "/index.html"):
+                assert hd.get("content-security-policy") == want, (p, hd)
+            else:
+                assert "content-security-policy" not in hd, (p, hd)
+        hd = frame_request(srv, "GET", "/", host="evil.example:1")[1]
+        assert hd.get("cross-origin-resource-policy") == "same-origin"
+
+
+@test
 def test_byte_range_on_media():
     h = new_home()
     root = site(h)
@@ -298,6 +377,89 @@ def test_review_source_follows_served_files_and_resets_on_rebuild():
         assert _source_mtime(srv) == _ms(entry), "the record starts again after a rebuild"
 
 
+def _stale_setup(h):
+    """A site, its page built now (sourceMtime = the entry's mtime), everything in the past."""
+    root = site(h)
+    entry, css = os.path.join(root, "index.html"), os.path.join(root, "css", "site.css")
+    old = time.time() - 100
+    for p in (entry, css):
+        os.utime(p, (old, old))
+    html_page(h, SLUG, root, source_mtime=_ms(entry))
+    page = os.path.join(h, "pages", SLUG + ".html")
+    os.utime(page, (old + 1, old + 1))
+    return entry, css, page
+
+
+def _review_source(srv):
+    status, _, data = request(srv, "GET", "/api/review-source?slug=" + SLUG)
+    assert status == 200, status
+    return json.loads(data.decode("utf-8"))
+
+
+def _rebuild(h, page, entry, when):
+    """What a re-render does: the page is written again, with the entry's mtime now."""
+    root = os.path.dirname(entry)
+    html_page(h, SLUG, root, source_mtime=_ms(entry))
+    os.utime(page, (when, when))
+
+
+@test
+def test_review_source_right_after_a_rebuild_shows_no_change():
+    h = new_home()
+    entry, css, page = _stale_setup(h)
+    with serving(h) as srv:
+        frame_request(srv, "GET", "/", SLUG)
+        frame_request(srv, "GET", "/css/site.css", SLUG)
+        new = time.time()
+        os.utime(css, (new, new))
+        assert _review_source(srv)["mtime"] == _ms(css)
+        # Claude re-renders; the shell asks before the frame has reloaded anything.
+        _rebuild(h, page, entry, new + 5)
+        got = _review_source(srv)
+        assert got["mtime"] == _ms(entry), "no strip after a re-render, even before the frame reloads"
+        assert got["page"] == _ms(page), "page tells a waiting page that it was re-rendered"
+
+
+@test
+def test_a_css_edit_served_again_is_no_longer_a_change():
+    h = new_home()
+    entry, css, _ = _stale_setup(h)
+    with serving(h) as srv:
+        frame_request(srv, "GET", "/", SLUG)
+        frame_request(srv, "GET", "/css/site.css", SLUG)
+        assert _review_source(srv)["mtime"] == _ms(entry)
+        new = time.time()
+        os.utime(css, (new, new))
+        assert _review_source(srv)["mtime"] == _ms(css), "an edited stylesheet shows the strip"
+        frame_request(srv, "GET", "/css/site.css", SLUG)  # Reload, no re-render
+        assert _review_source(srv)["mtime"] == _ms(entry), "the frame has the edit now"
+
+
+@test
+def test_an_entry_edit_served_again_is_no_longer_a_change():
+    h = new_home()
+    entry, _, _ = _stale_setup(h)
+    with serving(h) as srv:
+        frame_request(srv, "GET", "/", SLUG)
+        built = _ms(entry)
+        new = time.time()
+        os.utime(entry, (new, new))
+        assert _review_source(srv)["mtime"] == _ms(entry) > built
+        frame_request(srv, "GET", "/", SLUG)
+        assert _review_source(srv)["mtime"] == built
+
+
+@test
+def test_an_entry_edit_before_the_frame_loaded_is_a_change():
+    h = new_home()
+    entry, _, _ = _stale_setup(h)
+    built = _ms(entry)
+    new = time.time()
+    os.utime(entry, (new, new))
+    with serving(h) as srv:
+        assert _review_source(srv)["mtime"] == _ms(entry) > built
+
+
 @test
 def test_review_source_for_md_pages_is_unchanged():
     h = new_home()
@@ -337,7 +499,7 @@ def test_no_second_response_after_headers_went_out():
     h.end_headers = lambda: None
     h.wfile = io.BytesIO()
 
-    def broken(slug, target, path):
+    def broken(slug, target, path, query=""):
         h._head(200, "text/css", 10)  # the headers are out, then the file fails
         raise RuntimeError("disk went away")
 
@@ -350,7 +512,7 @@ def test_no_second_response_after_headers_went_out():
     sent[:] = []
     h.close_connection = False
 
-    def early(slug, target, path):
+    def early(slug, target, path, query=""):
         raise RuntimeError("early")
 
     h._file_mode = early

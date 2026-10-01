@@ -10,6 +10,7 @@ server per home folder: a lock file decides, and a second instance gives up.
 from __future__ import print_function
 
 import datetime
+import errno
 import http.server
 import io
 import json
@@ -89,6 +90,16 @@ def _write_json(path, obj):
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
+
+
+# WSAEADDRINUSE, and WSAEACCES, which Windows gives for a port another socket holds
+# exclusively or that sits in an excluded range.
+_WIN_IN_USE = (10048, 10013)
+
+
+def _in_use(exc):
+    """True when a bind failed because the address is taken, not because it is missing."""
+    return exc.errno == errno.EADDRINUSE or getattr(exc, "winerror", None) in _WIN_IN_USE
 
 
 def ports_from_env():
@@ -186,7 +197,9 @@ class ReviewServer(object):
         self.frame_port = None
         self.frames = []
         self._frame_threads = []
-        self._served = {}      # slug -> {file path: mtime ms when first served} (1.2)
+        # slug -> {"page": page mtime the record belongs to,
+        #          "files": {file path: its mtime ms at the latest serve}} (1.2)
+        self._served = {}
         self._meta_cache = {}  # slug -> (page mtime, meta)
 
     @property
@@ -251,8 +264,15 @@ class ReviewServer(object):
         if socket.has_ipv6:
             try:
                 frames.append(_HTTPServer6(("::1", fport), frame_server.FrameHandler))
-            except OSError:
-                pass  # no IPv6 loopback here; every browser reached 127.0.0.1 in Phase 0
+            except OSError as exc:
+                if _in_use(exc):
+                    # Another program holds [::1]:fport, and a browser that tries ::1
+                    # first would reach it instead of us: try the next pair.
+                    for s in [httpd] + frames:
+                        s.server_close()
+                    return False
+                # No IPv6 loopback here; every browser reached 127.0.0.1 in Phase 0.
+                self.log("no IPv6 loopback for the frame listener (%s); 127.0.0.1 only" % exc)
         for s in [httpd] + frames:
             s.app = self
         self.httpd, self.port = httpd, httpd.server_address[1]
@@ -324,58 +344,85 @@ class ReviewServer(object):
         path = os.path.join(folder, slug + ".html")
         return path if os.path.dirname(os.path.realpath(path)) == folder else None
 
-    def frame_target(self, slug):
-        """{root, entry} of the HTML review called slug, in file mode, or None.
-        The page's meta is cached by the page's mtime; a rebuilt page also starts
-        its served-files record again, because the frame reloads every file."""
-        if not pages.HTML_SLUG_RE.match(slug or ""):
-            return None
+    def page_state(self, slug):
+        """(page mtime, meta) of the page called slug, or (None, None).
+
+        The page's mtime is read and compared in one hold of the guard: when it
+        differs from the mtime the served-files record belongs to, the record starts
+        again, because a rebuilt page reloads every file in the frame. Every caller
+        (the frame and /api/review-source) goes through here, so a review-source
+        request right after a rebuild already sees the empty record. The meta is
+        cached by the page's mtime."""
         path = self.page_path(slug)
-        try:
-            mtime = os.path.getmtime(path) if path else None
-        except OSError:
-            mtime = None
-        if mtime is None:
-            return None
+        if path is None:
+            return None, None
         with self._guard:
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                return None, None
+            rec = self._served.get(slug)
+            if rec is None or rec["page"] != mtime:
+                self._served[slug] = {"page": mtime, "files": {}}
             hit = self._meta_cache.get(slug)
-            if hit and hit[0] == mtime:
-                meta = hit[1]
-            else:
-                meta = None
-                if hit:
-                    self._served.pop(slug, None)
+            meta = hit[1] if hit and hit[0] == mtime else None
         if meta is None:
             meta = pages.read_meta(path)
             with self._guard:
                 self._meta_cache[slug] = (mtime, meta)
-        return frame_server.file_target(meta)
+        return mtime, meta
+
+    def frame_target(self, slug):
+        """{root, entry} of the HTML review called slug, in file mode, or None."""
+        if not pages.HTML_SLUG_RE.match(slug or ""):
+            return None
+        return frame_server.file_target(self.page_state(slug)[1])
 
     def note_served(self, slug, path):
-        """Remember a file the frame served, with its mtime then (the 1.2 stale check)."""
+        """Remember a file the frame served, with its mtime now (the 1.2 stale check).
+        Every serve overwrites the last one: once the frame has the current file, it
+        is no longer a change."""
         try:
             mtime = int(os.path.getmtime(path) * 1000)
         except OSError:
             return
         with self._guard:
-            seen = self._served.setdefault(slug, {})
-            if path not in seen and len(seen) < MAX_SERVED:
-                seen[path] = mtime
+            rec = self._served.get(slug)
+            if rec is None:
+                return  # frame_target makes the record; without it there is no page
+            files = rec["files"]
+            if path in files or len(files) < MAX_SERVED:
+                files[path] = mtime
 
-    def served_mtime(self, slug):
-        """The newest mtime among served files that changed after they were served,
-        or None. A file that was simply newer than the page all along is no change."""
+    def html_source_mtime(self, slug, meta, entry):
+        """What /api/review-source answers as an HTML page's mtime (1.2).
+
+        The newest current mtime of a served file that changed after its latest
+        serve; else the entry's current mtime when the frame never loaded it and
+        it changed after the build; else the build's sourceMtime. So an edit shows
+        the strip, a reload of the edited file clears it, and a re-render (which
+        empties the record, see page_state) shows none."""
         with self._guard:
-            seen = dict(self._served.get(slug, {}))
+            rec = self._served.get(slug)
+            files = dict(rec["files"]) if rec else {}
         newest = None
-        for path, first in seen.items():
+        for path, seen in files.items():
             try:
                 now = int(os.path.getmtime(path) * 1000)
             except OSError:
                 continue
-            if now > first and (newest is None or now > newest):
+            if now > seen and (newest is None or now > newest):
                 newest = now
-        return newest
+        if newest is not None:
+            return newest
+        built = (meta or {}).get("sourceMtime")
+        if not isinstance(built, int) or isinstance(built, bool):
+            built = None
+        if entry not in files:
+            now = int(os.path.getmtime(entry) * 1000)
+            if built is None or now > built:
+                return now
+        return built if built is not None else int(os.path.getmtime(entry) * 1000)
 
     def freshen(self, slug, path):
         """Rebuild the page first if its source is newer than the page says.
@@ -507,6 +554,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return self._send(200, html, "text/html; charset=utf-8")
 
     def _review_source(self, slug):
+        if pages.HTML_SLUG_RE.match(slug or ""):
+            # An HTML page's source is its entry file plus every file the frame
+            # served (1.2). page_state starts the served record again after a rebuild.
+            page_mtime, hmeta = self.app.page_state(slug)
+            target = frame_server.file_target(hmeta)
+            if target:
+                entry = os.path.realpath(os.path.join(target["root"], target["entry"]))
+                try:
+                    mtime = self.app.html_source_mtime(slug, hmeta, entry)
+                except OSError:
+                    return self._json(404, {"ok": False})
+                return self._json(200, {"mtime": mtime, "page": int(page_mtime * 1000)})
         path = self.app.page_path(slug)
         meta = pages.read_meta(path) if path and os.path.isfile(path) else None
         # "page" lets a waiting page tell a re-render from Claude's first edit.
@@ -514,15 +573,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             built = int(os.path.getmtime(path) * 1000) if meta is not None else None
         except OSError:
             built = None
-        target = frame_server.file_target(meta)
-        if target:
-            # An HTML page's source is its entry file plus every file the frame
-            # served that changed since (1.2).
-            try:
-                mtime = int(os.path.getmtime(os.path.join(target["root"], target["entry"])) * 1000)
-            except OSError:
-                return self._json(404, {"ok": False})
-            return self._json(200, {"mtime": max(mtime, self.app.served_mtime(slug) or 0), "page": built})
         src = source_of(meta)
         if not src:
             return self._json(404, {"ok": False})

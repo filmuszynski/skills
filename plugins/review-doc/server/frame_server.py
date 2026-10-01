@@ -171,7 +171,8 @@ def resolve(root, url_path):
     None for anything outside root (symlinks and junctions resolved), any part that
     starts with a dot (so .env and .git never leak), a backslash, a colon (drive
     letters, Windows streams), a NUL, bad percent-encoding, and any type outside
-    TYPES. A directory serves its index.html."""
+    TYPES. A directory path that ends in / serves its index.html; without the
+    slash it is None, and the handler redirects it (see needs_slash)."""
     try:
         path = unquote(url_path or "", errors="strict")
     except UnicodeDecodeError:
@@ -188,15 +189,35 @@ def resolve(root, url_path):
     if _hidden(os.path.relpath(target, real_root).replace("\\", "/").split("/")):
         return None
     if os.path.isdir(target):
+        if not path.endswith("/"):
+            # Served here, the index file's relative links would resolve against
+            # the parent folder.
+            return None
         # The index file may itself be a link: judge the file it really is.
         target = os.path.realpath(os.path.join(target, "index.html"))
         if not _inside(real_root, target):
             return None
         if _hidden(os.path.relpath(target, real_root).replace("\\", "/").split("/")):
             return None
+    elif path.endswith("/"):
+        return None  # a file is never a folder: /index.html/ is not /index.html
     if os.path.splitext(target)[1].lower() not in TYPES or not os.path.isfile(target):
         return None
     return target
+
+
+def needs_slash(root, url_path):
+    """True when url_path names a directory without its trailing slash, and the
+    slashed path is one resolve() serves. Judged by resolve itself, so a redirect
+    never confirms anything resolve would refuse (a dot folder, a link out)."""
+    if not url_path or url_path.endswith("/"):
+        return False
+    try:
+        if unquote(url_path, errors="strict").endswith("/"):
+            return False
+    except UnicodeDecodeError:
+        return False
+    return resolve(root, url_path + "/") is not None
 
 
 def file_target(meta):
@@ -258,6 +279,7 @@ class FrameHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         for k, v in headers:
             self.send_header(k, v)
         self.end_headers()
@@ -297,15 +319,18 @@ class FrameHandler(http.server.BaseHTTPRequestHandler):
     do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = _not_allowed
 
     def _serve(self):
-        self.app.last_request = time.time()
         slug = self._slug()
         target = self.app.frame_target(slug) if slug else None
         if target is None:
+            # Not activity: any web page can send these, and they must not keep
+            # the server alive.
             return self._plain(403, "Forbidden: no HTML review answers to this name.\n")
-        path = urlsplit(self.path).path or "/"
+        self.app.last_request = time.time()
+        u = urlsplit(self.path)
+        path = u.path or "/"
         self._sent = False
         try:
-            return self._file_mode(slug, target, path)
+            return self._file_mode(slug, target, path, u.query)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             return None  # the browser went away mid-file (a video seek, a reload)
         except Exception:  # noqa: BLE001
@@ -317,13 +342,17 @@ class FrameHandler(http.server.BaseHTTPRequestHandler):
                 return None
             return self._plain(500, "Internal error; see server.log in the review-doc folder.\n")
 
-    def _file_mode(self, slug, target, path):
+    def _file_mode(self, slug, target, path, query=""):
         if path == PROBE_PATH:
             return self._probe()
         if path.startswith(RESERVED):
             return self._plain(404, "Not found.\n")
         file = resolve(target["root"], "/" + quote(target["entry"]) if path == "/" else path)
         if file is None:
+            if needs_slash(target["root"], path):
+                # One leading slash: //host/... would be a link to another site.
+                loc = "/" + path.lstrip("/") + "/" + ("?" + query if query else "")
+                return self._plain(301, "Moved: %s\n" % loc, [("Location", loc)])
             return self._plain(404, "Not found.\n")
         self.app.note_served(slug, file)
         if os.path.splitext(file)[1].lower() in HTML_EXT:
@@ -337,6 +366,8 @@ class FrameHandler(http.server.BaseHTTPRequestHandler):
         # Every reload shows the file as it is now, never a cached copy.
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        # Defence in depth: no other origin may load the site's files.
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
         for k, v in extra:
             self.send_header(k, v)
         self.end_headers()
@@ -353,7 +384,12 @@ class FrameHandler(http.server.BaseHTTPRequestHandler):
         with open(file, "rb") as fh:
             raw = fh.read()
         data, ctype = rewrite_html(raw, secrets.token_hex(16))
-        self._head(200, ctype, len(data))
+        # Our own policy, a header of its own: only the review page may frame the
+        # site. Browsers enforce it beside the page's <meta> policy, never merged.
+        main = self.app.frame_port - FRAME_OFFSET
+        self._head(200, ctype, len(data), [(
+            "Content-Security-Policy",
+            "frame-ancestors http://127.0.0.1:%d http://localhost:%d" % (main, main))])
         if self.command != "HEAD":
             self.wfile.write(data)
 

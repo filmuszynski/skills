@@ -158,8 +158,23 @@ def test_resolve_serves_web_files_inside_the_root():
     assert r("/index.html") == os.path.join(real, "index.html")
     assert r("/css/site.css") == os.path.join(real, "css", "site.css")
     assert r("/sub/") == os.path.join(real, "sub", "index.html")
-    assert r("/sub") == os.path.join(real, "sub", "index.html")
+    assert r("/sub%2F") == os.path.join(real, "sub", "index.html")
     assert r("/img/dot%2Esvg") == os.path.join(real, "img", "dot.svg")
+    # Without the slash the index file's links would resolve against the parent:
+    # resolve refuses, and the handler redirects (needs_slash).
+    assert r("/sub") is None
+    assert r("/index.html/") is None, "a file is never a folder"
+
+
+@test
+def test_needs_slash_only_for_folders_resolve_would_serve():
+    root = _site()
+    os.makedirs(os.path.join(root, "noindex"))
+    ns = lambda p: frame_server.needs_slash(root, p)  # noqa: E731
+    assert ns("/sub") and ns("/%73ub")
+    for p in ("/sub/", "/sub%2F", "/.git", "/nested/.cache", "/noindex", "/missing", "/index.html",
+              "/notes.txt", "/../" + os.path.basename(os.path.dirname(root)), "", "/%ff"):
+        assert not ns(p), p
 
 
 @test
