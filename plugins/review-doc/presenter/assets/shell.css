@@ -1,0 +1,1261 @@
+/* Presenter shell. Light palette, extended to the chrome.
+
+   Two oranges on purpose: --accent is the brand orange and is used for rules,
+   marks, borders and focus rings, where contrast against text is not the issue.
+   --accent-ink is the darker one used whenever orange carries TEXT (the section
+   numbers, links), because #F0844E on #F6F4EF is about 2.4:1 and would fail the
+   4.5:1 floor at 11px. */
+
+:root {
+  --bg: #F6F4EF;
+  --ink: #2a2622;
+  --accent: #F0844E;
+  --accent-ink: #B8500F;
+  --label: #6f675c;
+  --surface: #efeae0;
+  --line: #d9d3c8;
+  --line-soft: #e2ddd3;
+  --link: #b5562a;
+  --panel: #fbf9f5;
+  --ok: #2f7d55;
+  --ok-soft: #e7f2ec;
+  --skip: #9a3b2a;
+  --skip-soft: #f7e9e5;
+  --mark: #d9a62e;
+  /* Sections keep the brand orange ring; tasks take a slate one. Both rings are
+     light and both carry the same dark text, so the hue is doing the work on its
+     own. #7BA6C6 was picked to sit at the same relative luminance as #F0844E
+     (0.3556 against 0.3558), so neither ring outweighs the other. */
+  --task: #7BA6C6;
+  /* The ring's own hue, darkened. A blue matched to the section ink's weight
+     came out #3171B9, which reads as a hyperlink; this is deeper than any link
+     blue and still unmistakably the ring's colour rather than a grey. */
+  --task-ink: #1A4B6F;
+  --mark-ink: #8a6412;   /* the mark colour is ~2:1 on the panel, unusable as 11px text */
+  --shadow: 0 1px 2px rgba(42, 38, 34, .07), 0 10px 30px rgba(42, 38, 34, .10);
+  --mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  --sans: system-ui, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  /* One column no wider than the window. Left to `auto`, a wide table or code
+     line in the document sized the column, and the header and footer grew
+     with it past the window's edge instead of staying one row inside it. */
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+/* Every child names its own row. Auto-placement would shift them all up
+   whenever the orphan strip is hidden, which handed the 1fr row to the footer:
+   it stretched to fill the page and its content sat at the top with dead space
+   underneath, and collapsing the answer barely changed its height. */
+header { grid-row: 1; }
+.orphans { grid-row: 2; }
+.stale { grid-row: 2; }   /* shares the row: the orphan strip never shows any more */
+main { grid-row: 3; }
+footer { grid-row: 4; }
+
+/* ---------------------------------------------------------------- header */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+header .doc-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Resting on a cut title for a moment (title-peek, set in shell.js) sends
+   every control away, eyebrow included, so the whole row is the title's. The
+   controls close as one column: 0fr to 1fr animates where display cannot, and
+   the title simply grows into the room as it opens. The negative margin takes
+   back the header gap the empty column would still hold. Visibility follows
+   at the end of the close, so hidden controls leave the tab order. */
+.controls-slot {
+  display: grid;
+  grid-template-columns: 1fr;
+  flex: none;
+  transition: grid-template-columns .25s ease, opacity .2s ease, margin-left .25s ease,
+              visibility 0s linear 0s;
+}
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 3px;
+  margin: -3px;
+  white-space: nowrap;
+}
+/* Squeezed to nothing, the buttons would wrap their labels and the hidden
+   column would grow the header by a line. They clip instead. */
+.controls > * { flex-shrink: 0; }
+header .eyebrow {
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 12em;
+  transition: max-width .25s ease, opacity .2s ease, margin-left .25s ease;
+}
+header.title-peek .controls-slot {
+  grid-template-columns: 0fr;
+  opacity: 0;
+  margin-left: -14px;
+  visibility: hidden;
+  transition: grid-template-columns .25s ease, opacity .2s ease, margin-left .25s ease,
+              visibility 0s linear .25s;
+}
+header.title-peek .eyebrow { max-width: 0; opacity: 0; margin-left: -14px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .controls-slot, header.title-peek .controls-slot, header .eyebrow { transition: none; }
+}
+
+header .spacer { margin-left: auto; }
+
+/* Only the title gives way when the row runs short; every control keeps its
+   size, which is what keeps the header one row on a narrow window. */
+header > * { flex-shrink: 0; }
+header > .doc-title { flex-shrink: 1; }
+
+/* Undo and redo are one control in two halves, so they sit as close as the
+   counters do rather than at the header's own spacing. */
+.history { display: flex; gap: 5px; }
+
+/* Undo and redo are a pair and reset is not one of them, so it stands off from
+   the two rather than reading as the third of three. 9px against the row's own
+   5px puts it at the header's 14px, the same air that separates every other
+   group of buttons up there. */
+#reset { margin-left: 9px; }
+
+.eyebrow, .count {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--label);
+}
+
+/* The counters are also the navigation, so they have to read as buttons. */
+.counters { display: flex; gap: 5px; }
+
+/* A counter is a symbol and a number; the words are in its tooltip. The
+   symbol is drawn in currentColor, so it takes the chip's ink with it. */
+.counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--label);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  padding: 5px 7px 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.counter .ico {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.counter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.counter:disabled { opacity: .45; cursor: default; }
+.counter:not(:disabled) { font-weight: 600; }
+
+/* Each counter wears its own mark's colour, so the chip and the highlight it
+   jumps to are obviously the same thing. The underline carries the exact mark
+   colour; the text uses a darker ink of the same hue, because the mark colours
+   are decorative and would fail the contrast floor at 11px. */
+.counter[data-kind="comments"] { border-bottom: 2px solid var(--mark); }
+.counter[data-kind="comments"]:not(:disabled) { color: var(--mark-ink); }
+.counter[data-kind="comments"]:hover:not(:disabled) { background: rgba(217, 166, 46, .18); border-color: var(--mark); }
+
+.counter[data-kind="edits"] { border-bottom: 2px solid var(--accent); }
+.counter[data-kind="edits"]:not(:disabled) { color: var(--accent-ink); }
+.counter[data-kind="edits"]:hover:not(:disabled) { background: rgba(240, 132, 78, .18); border-color: var(--accent); }
+
+/* The total is a tally, not a mark. It stays in the quiet label colour so the
+   two coloured counters keep their meaning. */
+.counter[data-kind="all"] { border-bottom: 2px solid var(--line); }
+.counter[data-kind="all"]:not(:disabled) { color: var(--label); font-weight: 500; }
+.counter[data-kind="all"]:hover:not(:disabled) { background: var(--surface); border-color: var(--label); color: var(--ink); }
+
+/* Where a jump landed. It has to survive being fired at the same element
+   twice in a row, hence the reflow before the class goes back on. */
+@keyframes nav-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(240, 132, 78, .55); }
+  70%  { box-shadow: 0 0 0 10px rgba(240, 132, 78, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(240, 132, 78, 0); }
+}
+
+.is-target {
+  animation: nav-pulse 1.3s ease-out;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .is-target { animation: none; outline: 2px solid var(--accent); outline-offset: 3px; }
+}
+
+.modes { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+
+.modes button {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--label);
+}
+
+.modes button[aria-pressed="true"] { background: var(--accent); color: #2a1608; font-weight: 600; }
+
+.iconbtn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.iconbtn:hover:not(:disabled) { background: var(--surface); }
+.iconbtn:disabled { opacity: .38; cursor: default; }
+
+/* Armed reset: the button inverts to the decline red and wears an exclamation
+   mark until it is clicked again or the four seconds run out. The hover rule
+   above is a class plus two pseudo-classes, so this needs its own hover or the
+   colour drops away under the pointer that is about to click it. */
+.iconbtn.armed,
+.iconbtn.armed:hover:not(:disabled) {
+  background: var(--skip);
+  border-color: var(--skip);
+  color: #fff;
+}
+
+/* The mark is drawn inside the icon's own box, which keeps its width, so the
+   header does not shuffle sideways at the moment it asks for confirmation. */
+.iconbtn.armed .ico-reset {
+  -webkit-mask: none;
+  mask: none;
+  background: none;
+  transform: none;
+  position: relative;
+}
+
+.iconbtn.armed .ico-reset::after {
+  content: "!";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 1em is the size the undo and redo glyphs beside it are set at, and its
+     cap height then lands on the 10px the loop it replaces occupies. */
+  font-size: 1em;
+  font-weight: 400;
+  line-height: 1;
+  color: currentColor;
+  /* The loop it replaces is a ring centred on its box, but an exclamation mark
+     is bottom-heavy, so centring it by geometry leaves it reading low. */
+  transform: translateY(-1px);
+}
+
+/* -------------------------------------------------------- orphan notice */
+
+/* The strip is no longer filled: a comment whose text changed is re-anchored
+   on the page instead (see anchorMark in shell.js). The element and its grid
+   row stay so the layout does not shift. */
+.orphans { display: none; }
+
+/* --------------------------------------------------------- stale notice */
+
+/* Shown when the source Markdown is newer than this page (see watchSource in
+   shell.js). Reloading asks the ring, which rebuilds the page first. */
+.stale {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 18px;
+  background: #fbeedd;
+  border-bottom: 1px solid var(--accent);
+  color: var(--ink);
+  font-size: 13px;
+}
+.stale[hidden] { display: none; }
+
+/* ------------------------------------------------------------------ main */
+
+main { min-height: 0; }
+
+/* Everything inside #doc is sized in em against this, so Ctrl and the wheel
+   scale the text without touching the header, footer or bubbles, which sit
+   outside and keep their own pixel sizes. */
+#doc {
+  --zoom: 1;
+  font-size: calc(15px * var(--zoom));
+  height: 100%;
+  overflow: auto;
+  /* 20px a side, so on a window narrower than the text column a section's
+     frame (hover line, or the outline a decision draws) keeps its distance
+     from the edge instead of touching it. */
+  padding: 28px 20px 90px;
+  scrollbar-gutter: stable;
+}
+
+/* -------------------------------------------------------------- document */
+
+.sec {
+  /* Named, because a subsection has to narrow itself by a known amount. */
+  --measure: 57.3em;
+  max-width: var(--measure);
+  /* Blocks that can each carry their own outline need to read as separate
+     objects, so the air between them is wider than the space inside them. */
+  margin: 0 auto 1.1em;
+  padding: .93em 1.73em 1.2em;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.sec { position: relative; }
+.sec:hover { border-color: var(--line-soft); }
+
+/* ---------------------------------------------------------- credit line */
+
+/* The last thing in the document, on the same column as the sections and
+   sized in em so it zooms with them. Chrome, not text: it cannot be selected,
+   so it can never become a comment. Its em is .8 of a section's, so the
+   section's measure and side padding are divided by .8 to land on the same
+   column. */
+#doc .credit {
+  max-width: calc(57.3em / .8);
+  margin: 3em auto 0;
+  padding: .9em calc(1.73em / .8) 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: .8em;
+  color: var(--label);
+  user-select: none;
+}
+#doc .credit a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+#doc .credit a:hover { color: var(--link); }
+.credit-sep { margin: 0 .4em; }
+.credit-settings {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+}
+.credit-settings:hover { color: var(--link); }
+.credit-settings[aria-disabled="true"] { opacity: .55; cursor: default; text-decoration: none; }
+
+/* Every block hangs its number in the left margin, so the document forms a
+   column you can count without reading, and all of them indent to make room. */
+.numbered .sec { padding-left: 3.6em; }
+
+.sec-marker {
+  --ctl: calc(15px * var(--zoom, 1));
+  position: absolute;
+  left: .8em;
+  top: .85em;
+  width: calc(var(--ctl) * 1.9);
+  height: calc(var(--ctl) * 1.9);
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  color: var(--accent-ink);
+  font-size: calc(var(--ctl) * .85);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+/* A task repeats the section's relationship in its own hue: a light ring
+   carrying darker text of the same colour. */
+.sec[data-kind="task"] .sec-marker { border-color: var(--task); color: var(--task-ink); }
+.sec[data-kind="task"] .sec-num { color: var(--task-ink); }
+
+/* A document's subsection is a sibling that indents, not a child: flat in the
+   data, nested to the eye. Insetting the box rather than its text means a
+   decision's outline nests too, so the hierarchy still reads once the document
+   is marked up. It borrows the task's hue, being the same relationship. */
+/* `.sec` is centred by `margin: 0 auto`, and a margin-left silently destroys
+   that: the block drops to the far left of the window instead of indenting.
+   So the box is narrowed by 2em, which the auto margins split into 1em a side,
+   and then nudged 1em right. Left edge in by 2em, right edge where it was, and
+   the decision outline nests along with it. */
+.numbered .sec[data-kind="sub"] {
+  max-width: calc(var(--measure) - 2em);
+  left: 1em;
+}
+.sec[data-kind="sub"] .sec-num { color: var(--task-ink); }
+
+/* A document page (`.plain`) has no ring, no number and no eyebrow: the
+   headings carry the structure, in the dark orange. A subsection still nests,
+   by the same narrow-and-nudge as a numbered one. */
+.plain .sec[data-kind="sub"] {
+  /* Capped by the column too: once the window is narrower than the measure,
+     the plain cap is never reached and the 1em nudge pushed the right edge
+     past the 20px the document keeps on each side. */
+  max-width: min(calc(var(--measure) - 2em), calc(100% - 2em));
+  left: 1em;
+}
+.plain h2, .plain h3 { color: var(--accent-ink); }
+
+/* "2.1" does not fit a ring drawn for "2", and "12.3" fits nothing. Only this
+   kind becomes a pill; every other marker keeps its circle. Sized in --ctl
+   throughout, or Ctrl+wheel would leave the number behind. */
+.sec[data-kind="sub"] .sec-marker {
+  border-color: var(--task);
+  color: var(--task-ink);
+  width: auto;
+  min-width: calc(var(--ctl) * 1.9);
+  padding: 0 calc(var(--ctl) * .32);
+  border-radius: 999px;
+  font-size: calc(var(--ctl) * .72);
+}
+
+/* A decision draws the section's own outline and touches nothing inside it.
+   Not the ring in the margin, which keeps the colour of what the block IS, a
+   section or a task; not the ground; and not the text, which a declined
+   section used to fade to 55%. The decision is laid around the block rather
+   than washed over it.
+
+   .sec already carries a transparent 1px border for the hover rule, so this
+   only sets a colour and nothing moves. These come after `.sec:hover`, which
+   matches at the same weight, so a decided section keeps its colour under the
+   pointer. */
+.sec[data-decision="ok"] { border-color: var(--ok); }
+.sec[data-decision="skip"] { border-color: var(--skip); }
+
+.sec-tag {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: .73em;
+  color: var(--label);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: .55em;
+  user-select: none;
+}
+
+.sec-num { color: var(--accent-ink); font-weight: 700; }
+
+/* A tag row with nothing in it takes no room. It stays in the markup because a
+   comment whose passage has gone is parked there. */
+.sec-tag:empty { margin: 0; }
+
+/* A card's name is its heading, lettered like an h2 in the dark orange, with
+   the letter kept in front because that is how an answer names it. The tag
+   row is set at .73em, so the size is the h2's 1.33em divided back out. */
+/* Lettered as the eyebrow it replaced: the tag row already sets the size,
+   the capitals and the tracking, so the title only adds the weight and the
+   dark orange. */
+.card-title {
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+/* "Plan at a glance" is one label, so it is lettered as one. Everywhere else a
+   grey second half is doing a job: on an option card the name greys until the
+   row is hovered, which is how a pickable row says it is pickable. The meta
+   block is not pickable and has nothing to say on hover. */
+
+/* And the block wears the ring's own outline, 2px of the bright orange, so the
+   plan opens on the same mark it counts itself with. It has to come after
+   `.sec:hover`, which matches at the same weight, or the pointer would grey it.
+   box-sizing is border-box everywhere, so the second pixel costs padding rather
+   than moving the block. */
+.sec[data-sec="__meta"],
+.sec[data-sec="__meta"]:hover { border: 2px solid var(--accent); }
+.sec-tools { margin-left: auto; display: flex; gap: calc(15px * var(--zoom, 1) * .37); align-items: center; }
+
+/* The controls stay quiet until the section is hovered or a decision is on
+   it, so twelve tick boxes do not shout down the document. */
+.sec-tools .dec, .sec-tools .note-btn { opacity: .25; transition: opacity .12s ease; }
+.sec:hover .sec-tools .dec,
+.sec:hover .sec-tools .note-btn,
+.sec-tools .dec[data-decision="ok"],
+.sec-tools .dec[data-decision="skip"],
+.sec-tools .note-btn[data-has-note="yes"],
+.sec-tools .dec:focus-visible,
+.sec-tools .note-btn:focus-visible { opacity: 1; }
+
+#doc h1 { font-size: 1.73em; line-height: 1.25; margin: 0 0 .67em; }
+
+/* A section's own heading is lettered as the eyebrow used to be: small,
+   capitals, tracked, bold, in the dark orange. A plan's task and a document's
+   subsection take the blue their eyebrow wore, so the two levels still read
+   apart. Only the block's own heading (the one carrying data-sec) changes; a
+   heading inside the section's text keeps the document type. The right
+   padding keeps a long heading clear of the tick and pencil. The #doc prefix
+   is what lets these outweigh the #doc h2/h3 rules below. */
+#doc .plain .sec > h2[data-sec],
+#doc .plain .sec > h3[data-sec],
+#doc .plain .sec[data-sec="__meta"] > h2 {
+  font-size: .73em;
+  line-height: 1.6;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--accent-ink);
+  margin: 0 0 .75em;
+  padding-right: 4.5em;
+}
+#doc .plain .sec[data-kind="task"] > h2[data-sec],
+#doc .plain .sec[data-kind="sub"] > h3[data-sec] { color: var(--task-ink); }
+
+/* The heading sits where the eyebrow sat, on the line of the tick and the
+   pencil, so their row is lifted out of the flow and pinned top right. Only
+   when the block has a heading: an intro's tools would otherwise sit on top
+   of its first line. */
+.plain .sec:has(> h2[data-sec], > h3[data-sec]) > .sec-tag {
+  position: absolute;
+  top: .91em;
+  right: 1.73em;
+  margin: 0;
+}
+
+#doc h2 {
+  font-size: 1.33em;
+  line-height: 1.3;
+  margin: .27em 0 .67em;
+  text-transform: uppercase;
+  letter-spacing: .015em;
+}
+
+#doc h3 { font-size: 1.07em; margin: 1.07em 0 .4em; }
+#doc h4 { font-size: 1em; margin: .93em 0 .27em; }
+#doc p { margin: 0 0 .67em; }
+#doc ul, #doc ol { margin: 0 0 .67em 1.47em; padding: 0; }
+#doc li { margin: 0 0 .27em; }
+
+#doc blockquote {
+  margin: 0 0 .67em;
+  padding: .4em .93em;
+  border-left: 3px solid var(--accent);
+  color: #5a534b;
+  background: var(--panel);
+}
+
+#doc table { border-collapse: collapse; width: 100%; margin: .4em 0 .8em; font-size: .93em; }
+#doc th, #doc td { border: 1px solid var(--line); padding: .43em .64em; vertical-align: top; text-align: left; }
+#doc th { background: var(--surface); }
+#doc hr { border: 0; border-top: 1px solid var(--line); margin: .93em 0; }
+#doc code { background: var(--surface); padding: .07em .29em; border-radius: 3px; font-size: .87em; font-family: var(--mono); }
+
+#doc pre {
+  font-size: .87em;
+  margin: 0 0 .8em;
+  padding: .67em .87em;
+  background: var(--surface);
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  overflow-x: auto;
+}
+
+#doc pre code { background: none; padding: 0; font-size: 1em; line-height: 1.5; white-space: pre; }
+#doc a { color: var(--link); }
+
+/* ------------------------------------------------------------------ cards */
+
+/* Option cards. They are ordinary sections underneath, so comments, rewrites
+   and the counters work on them unchanged; the only addition is that one can
+   be chosen. */
+.cards {
+  max-width: 57.3em;
+  margin: 0 auto;
+  display: grid;
+  gap: 1.1em;                 /* the air two sections sit at */
+}
+
+/* The lead-in is prose, not an option, so it keeps the document's own width
+   and none of a card's chrome. */
+.sec.lead { border-color: transparent; background: none; margin-bottom: 1.2em; }
+.sec.lead:hover { border-color: var(--line-soft); }
+
+.sec.card {
+  max-width: none;
+  margin: 0;
+  border-color: var(--line);
+  background: #fff;
+}
+
+.sec.card:hover { border-color: var(--line-soft); }
+
+/* Chosen is drawn the way an approved section is: the card's own outline, in
+   the bright orange of the number ring, at the ring's own 2px. The wash and the
+   shadow ring that used to say it are both gone, for the same reason the
+   decision colours left the section's ground alone. */
+.sec.card[data-picked="yes"] { border: 2px solid var(--accent); }
+
+.pick-row { cursor: pointer; }
+
+.pick {
+  --ctl: calc(15px * var(--zoom, 1));
+  width: calc(var(--ctl) * 1.2);
+  height: calc(var(--ctl) * 1.2);
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pick-row:hover .pick { border-color: var(--accent); }
+.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.pick[aria-checked="true"] {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 45%, #fff 46%);
+}
+
+/* Many-of choices are square, so the shape says whether picking one rules the
+   others out before anybody clicks anything. */
+.cards[data-select="many"] .pick { border-radius: 5px; }
+.cards[data-select="many"] .pick[aria-checked="true"] {
+  background: var(--accent);
+}
+
+.sec.card svg { max-width: 100%; height: auto; color: var(--label); }
+
+/* ------------------------------------------------------------------ steps */
+
+.step {
+  display: flex;
+  gap: .67em;
+  align-items: flex-start;
+  padding: .33em .53em .33em .4em;
+  border-radius: 6px;
+  margin: 0 0 .13em -.4em;
+}
+
+.step:hover { background: var(--panel); }
+.step-body { flex: 1; min-width: 0; }
+.step-body > :last-child { margin-bottom: 0; }
+.step[data-decision="skip"] .step-body { opacity: .5; text-decoration-color: var(--skip); }
+
+/* ---------------------------------------------------- decision controls */
+
+/* Sized against the document, not the parent. These controls sit in two places
+   with different font sizes, the section tag being smaller than the body text,
+   so plain em made the section controls noticeably smaller than the step ones.
+   Deriving from --zoom keeps them identical in both and still scaling. */
+.dec, .note-btn {
+  --ctl: calc(15px * var(--zoom, 1));
+  flex: none;
+  width: calc(var(--ctl) * 1.47);
+  height: calc(var(--ctl) * 1.47);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: calc(var(--ctl) * .8);
+  line-height: 1;
+  padding: 0;
+  color: var(--label);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dec { margin-top: calc(var(--ctl) * .13); }
+
+/* The pencil glyph runs upper-left to lower-right in most fonts. Mirrored it
+   runs lower-left to upper-right, which reads as writing rather than striking
+   out. The button box is symmetric, so flipping the whole control is safe. */
+.note-btn { transform: scaleX(-1); }
+.dec:hover, .note-btn:hover { border-color: var(--accent); color: var(--accent-ink); }
+.dec:focus-visible, .note-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.dec[data-decision="ok"] { background: var(--ok); border-color: var(--ok); color: #fff; }
+.dec[data-decision="skip"] { background: var(--skip); border-color: var(--skip); color: #fff; }
+.note-btn[data-has-note="yes"] { background: var(--mark); border-color: var(--mark); color: #33280a; }
+
+/* ------------------------------------------ always-on feedback highlights */
+
+mark.has-comment {
+  background: rgba(217, 166, 46, .22);
+  border-bottom: 2px solid var(--mark);
+  border-radius: 2px;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+mark.has-comment:hover, mark.has-comment.is-open { background: rgba(217, 166, 46, .45); }
+
+/* A comment whose passage is gone sits on its section's tag. The mark is empty
+   so it never enters the text a search runs over; the label is drawn here. */
+mark.has-comment.at-section {
+  display: inline-block;
+  padding: 1px 7px;
+  border-bottom: 0;
+  border-radius: 9px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #33280a;
+  background: var(--mark);
+}
+/* The same speech bubble as the comment counter, drawn as a mask so it takes
+   the pill's text colour. The label sits in ::after so the icon can be a box
+   of its own. */
+mark.has-comment.at-section::before {
+  content: "";
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  margin-right: 4px;
+  vertical-align: -1px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 3.5h10a1.2 1.2 0 0 1 1.2 1.2v5.1a1.2 1.2 0 0 1-1.2 1.2H7.2L4.4 13.4V11H3a1.2 1.2 0 0 1-1.2-1.2V4.7A1.2 1.2 0 0 1 3 3.5z' fill='none' stroke='black' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 3.5h10a1.2 1.2 0 0 1 1.2 1.2v5.1a1.2 1.2 0 0 1-1.2 1.2H7.2L4.4 13.4V11H3a1.2 1.2 0 0 1-1.2-1.2V4.7A1.2 1.2 0 0 1 3 3.5z' fill='none' stroke='black' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+mark.has-comment.at-section::after { content: "comment"; }
+mark.has-comment.at-section:hover, mark.has-comment.at-section.is-open { background: var(--mark); filter: brightness(1.08); }
+
+/* A table change whose table has since changed in the source: same pill,
+   in the rewrite colour, since it counts and navigates as an edit. */
+mark.tbl-orphan.at-section {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 9px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #3a1a08;
+  background: rgba(240, 132, 78, .45);
+}
+mark.tbl-orphan.at-section::after { content: "table change"; }
+
+/* A rewrite marks the words that changed, not the paragraph around them. Same
+   shape as a comment mark so both read as feedback, orange rather than yellow
+   so the two never read as the same thing.
+
+   Highlighted in BOTH modes: this is a requirement, not a mode affordance. */
+mark.edited {
+  background: rgba(240, 132, 78, .26);
+  border-bottom: 2px solid var(--accent);
+  border-radius: 2px;
+  color: inherit;
+  padding: 0;
+}
+
+body.mode-comment mark.edited { cursor: pointer; }
+body.mode-comment mark.edited:hover,
+mark.edited.is-open { background: rgba(240, 132, 78, .48); }
+
+/* A rewrite that only removed words has nothing to wrap, so it leaves a narrow
+   wedge instead. Without it a deletion would be invisible and unclickable. */
+mark.edited-cut { padding: 0 4px; }
+
+mark.edited-cut::after {
+  content: "\2702";
+  font-size: 9px;
+  color: var(--accent-ink);
+  vertical-align: super;
+}
+
+/* Fallback for a paragraph too large to diff. The whole element is marked, and
+   this is now the only case where that still happens. */
+.chg-whole {
+  background: rgba(240, 132, 78, .20);
+  border-bottom: 2px solid var(--accent);
+  border-radius: 2px;
+}
+
+body.mode-comment .chg-whole { cursor: pointer; }
+
+body.mode-edit [data-edit-id] { outline: 1px dashed #c9c1b3; outline-offset: 2px; }
+body.mode-edit [data-edit-id]:focus,
+body.mode-edit [data-new-cell]:focus { outline: 2px solid var(--accent); background: #fff; }
+
+/* --------------------------------------------------------------- bubble */
+
+.bubble {
+  position: absolute;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: var(--shadow);
+  padding: 11px 12px 10px;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+}
+
+.bubble-head {
+  margin: 0 0 7px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--label);
+}
+
+.bubble-quote {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #5a534b;
+  background: rgba(217, 166, 46, .16);
+  border-radius: 4px;
+  padding: 4px 7px;
+}
+
+.bubble-body { margin: 0 0 9px; font-size: 14px; white-space: pre-wrap; }
+
+.bubble-diff {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+  line-height: 1.45;
+  padding: 5px 7px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+
+.bubble-diff.old { color: var(--skip); background: var(--skip-soft); text-decoration: line-through; }
+.bubble-diff.new { color: var(--ok); background: var(--ok-soft); margin-bottom: 9px; }
+
+.bubble-diff.none {
+  color: var(--label);
+  background: var(--surface);
+  font-style: italic;
+  text-decoration: none;
+  margin-bottom: 9px;
+}
+
+.bubble-label {
+  margin: 0 0 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--label);
+}
+
+.bubble textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  padding: 6px 8px;
+  min-height: 58px;
+  resize: vertical;
+}
+
+.bubble textarea:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+.bubble-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
+.bubble-hint { margin: 7px 0 0; font-size: 11px; color: var(--label); }
+
+/* ------------------------------------------------------- settings panel */
+
+.settings-panel { width: 300px; }
+.set-row { display: flex; align-items: center; gap: 7px; margin: 0 0 6px; font-size: 13px; }
+.set-hours input {
+  width: 5.5em;
+  font: inherit;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--ink);
+}
+.set-hours input[aria-invalid="true"] { border-color: var(--skip); }
+.set-hint { margin: -2px 0 10px; }
+.set-check input { margin: 0; accent-color: var(--accent-ink); }
+.set-check.is-off { color: var(--label); }
+.set-note { margin-left: auto; font-size: 11px; color: var(--label); }
+.set-warn,
+.set-error { margin: 8px 0 0; font-size: 12px; border-radius: 4px; padding: 5px 7px; }
+.set-warn { color: var(--mark-ink); background: rgba(217, 166, 46, .14); }
+.set-error { color: var(--skip); background: var(--skip-soft); }
+
+/* ---------------------------------------------------------------- footer */
+
+footer {
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+  padding: 8px 20px 10px;
+}
+
+.prompt-row { display: flex; }
+
+.iconbtn.toggle { flex: none; }
+
+#prompt {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 148px;
+  overflow: auto;
+  margin: 0;
+  color: #4a443d;
+}
+
+#prompt.is-empty { color: var(--label); font-family: var(--sans); font-size: 12.5px; }
+
+/* Hidden means gone, not collapsed: the row keeps no height of its own so the
+   footer shrinks to the single control row. */
+body.prompt-hidden .prompt-row { display: none; }
+body.prompt-hidden .verdict-row { margin-top: 0; }
+
+.verdict-row {
+  --gap: 10px;
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  margin-top: 9px;
+}
+
+.general {
+  flex: 1;
+  min-width: 100px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
+.general:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+
+/* One height for the whole row, taken from the note field (7px padding, a
+   13px line, the border). The toggle and the verdict pills stretch or shrink
+   to it, so their edges line up with the field's. */
+.verdict-row { --foot-h: 36px; }
+.verdict-row .general,
+.verdict-row .chip,
+.verdict-row .iconbtn.toggle {
+  box-sizing: border-box;
+  height: var(--foot-h);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.verdict-row .chip { line-height: calc(var(--foot-h) - 2px); }
+.verdict-row .iconbtn.toggle { width: var(--foot-h); padding: 0; }
+
+
+.verdicts { display: flex; gap: 6px; }
+.verdicts:empty { display: none; }
+
+/* Pills, but they act. Each one records its verdict and copies the answer in a
+   single click, so they carry a button's weight rather than a selector's. All
+   three sit as outlines until one is used, and the one you last used fills, so
+   the marked state is the same shape as the hover it followed. */
+.chip {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip:disabled { opacity: .4; cursor: default; }
+
+.chip.approve { border-color: var(--ok); color: var(--ok); }
+.chip.approve:hover:not(:disabled) { background: var(--ok); color: #fff; }
+
+.chip.decline { border-color: var(--skip); color: var(--skip); }
+.chip.decline:hover:not(:disabled) { background: var(--skip); color: #fff; }
+
+/* Orange carrying text needs the darker of the two, so the outline is drawn in
+   the brand orange and lettered in the ink one. It then inverts into that same
+   ink orange under white, the way approve and decline invert into theirs.
+
+   Filling with the lighter orange instead would put white on #F0844E at 2.6:1.
+   Against the ink one it is 5.0:1, which is what --ok also measures, so all
+   three inverted chips carry the same contrast. */
+.chip.changes { border-color: var(--accent); color: var(--accent-ink); }
+
+/* The loop is a chosen image, not a character. Every circle-arrow in the font
+   the tick and the cross come from is drawn smaller and heavier than they are.
+   It is carried as a mask rather than as an <img> so it takes currentColor,
+   which is what lets it turn from orange to near-black when the chip fills.
+
+   The box is sized to the tick's ink, 0.85em tall, and the width follows the
+   artwork's own 91:96. Both are em, so the icon rides the label rather than
+   setting the button's height: the row is 43.2px with this and without it. */
+/* Both loops are the same chosen image, carried as a mask rather than as an
+   <img> so they take currentColor. That is what lets the footer one turn white
+   when its chip fills, and the header one match the two arrows beside it. */
+.ico-loop, .ico-reset {
+  display: inline-block;
+  background-color: currentColor;
+  -webkit-mask: var(--loop) center / contain no-repeat;
+  mask: var(--loop) center / contain no-repeat;
+}
+
+/* Request changes. Sized to the tick's ink, 0.85em tall, width following the
+   artwork's own 91:96. Both are em, so the icon rides the label rather than
+   setting the button's height: the row is 38.14px with this and without it. */
+.ico-loop {
+  --loop: url("data:image/png;base64,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");
+  width: .81em;
+  height: .85em;
+  vertical-align: -.12em;
+}
+
+/* Reset, which is that same loop turned round: one asks Claude to go again,
+   the other undoes the asking. Thinner artwork and a smaller box, so it sits
+   with the undo and redo arrows instead of shouting over them. */
+.ico-reset {
+  --loop: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFsAAABgCAYAAAByiw73AAAMKElEQVR42u2deewdVRXHPzPz+iulG4Uq0gKyFhAjRgSXFgyyKEqCGGWRPbJEjWACbiXGRDSGKFErEdA/lMUoa4JKBAQF3BAQ2UqVvVbaSFkslELb33tf/7jnwuVm5s289+b9ljI3mbzf+828mXu/98y555577vckkhjnkgAZIKAdncuAbYGdgB3t2AbYEpgNTLXr1gFrgGeAlcATwOP2uSrnmS17Xsc+62qH7N6fAY4GVgMXADcDaTJOYCdAan+HAE8H9gIWAvsCewLzgVl9Puc5YDnwAPA34A77e2PUoR74QdqTADOBq4CDg3Md4CvAd8YabA9yCPCbgIOAw4D9gO0KfhtLYRKdV0FnxuVR4FbgOuA24MXoN/1Ie2Ztuhw41jrTd2Jm1xwxVmDHICfAgcBxwEcM8BC0diAtSQ6wVYsiqW1F51cAvwIuBe7MAa9K8R20AFhmz0uDOrft+z1jAXZY8ZnAMcDpwLuCa9oVJLKu0rEjjZ71B+Ai4FpgtAfQW3b9kcAVdn2Wc92GYTbM927bdPGZwL3AxQZ0x875Vy0bA6B9vVqBRHpgDzCw7gKOD97EtGK9Nis5P5IOSWW0At13PHAP8H2zKtqBZGUVVISCjhmtcLR70LtpoFradrzT1MpfTcX5N6FVoZ6lD6tbamSN3hu4xSq+IAChTIJDYDuBasmswWVHlqMzRyt0gH+7/PP3Ba4Hfmkm52h0355Lq0agve5qAecAi4GRYLDL+tCjAC+ZrfyUfT4LvACsDwbAlqmqOcBcs83nAW/JeW47UnNFAugH1aPMlFtsKrDXAbR2sD3QewA/MTuZLoNF3PBQ2p8ym/gvpn4eBv4b6NaqZRawvdnq77U67WUC4MtoF50czgO2tMHzEJuwPB20uQfbSBrkSCRl9vfRkv4nVzZK6qi4jEbfn5R0gaRDJM0qeFZqz2qVHFmX+u4i6XRJN0paH9Wn3aW+HWuTJD0uaT+7n38mko4vaNurZRCgUwMbSd/oAmQMctgJN0o6StKM6N5ZAFz4nF4FIeyg+Pzuks61ji6qX1w84OslnWL3GbHnnDAssNOgZy+tUNFOVImrJL0/uqcHNxlQCMrq3Qrqj71Jn5X0r4oC0w7aeW5wn08NA2xf0WmSrrf7bKioMm6WtChHNQwT4DLg/ffpks6WtDoH1G7Cc6Gk+ZLOrBts/0pvbsCFr1a3Cq2UdGKkJtJxALhI3YSgbxe8rVWkXJLWSlqnktKPDhyRdEOJRIdScZWkeTkD6kQ7YtA/IWlViUCpZGDtC+ywIleUAD0anD8j0slMgiMNBGL74A0eLbFWOnWB7YE6vyLQqyQdMAFVBn20OZW0pKK1MjDY/qGnVAR6maQF9pspkxDkIvP2ixUGzq6lzMXqPWN724wuK5jm+pnivea8WdXXDGtiFu9qGAVOsyl7ux8/STewvdN+c+BuYLeC6bf/31LggzaV7ct3MMHLFFuB6RvwtIJUf9eAHs0B2nvx/g0cugkDjQE9Bfgx8OXAQziwZHvADgZuCrx5eUtO64D9gX9MItWRDeAqbQGvmHSfVsHZ1hVsrz6mmg7eNVhXi9cJW+aCvHKSAJ3UGLrwblvV6VRdF2gVqI82cJY5/fOk2q9c/NCAnhKFB0x0oA8FFgFb9AG+V69vLVjlryzZfqVlHvAQMCNnddu/Ng9a747WHOwyTKC3tpWjQ8ajEq2cSnVsVWJWjlQrAPxUWy3JJgHQfl30GltEGK3RJOwLbP967AicHAWYxNbHhbjoosmgp71aPMqA9lbFuFQkftXOAKYFa4ehVKe2Bvj1oHMmw6QEXNRVe5AF2wGKgFfSoEJtWyw9sYtUJ8D5uIDByQK2L38fJ5XnO/jViCivDj4PLMnR1R7op22C80LVWIkJJNkzbS6wE7ChV31L/9FXXmUdlEbxaCcXmDMe7ItxobnZJAHaC0RiAnIELrByJIgTGeYxxTr2VOCWRJKfLe5jIQTk6GqAl4Hdgf8EVstkKl7tzQFOAj6Ai/EeVtkA3A9cYmZymkjyKuQ84Es5KsR/vxr45CT3fYzXOJMCnVagQg4rcE55Kb98nEbyunVouNNBY9S5nXAG+XbgvpzZooKBcRdc4HjC5NHXE+61wvRXmqMe2kHs8ouTbGCcsGDvX3LdTQPuAGiKgT2CCzjM09d+MLyjhk0+Ddhm5O+QY/L5wWSF2aY0KmRwsN+GWyhQgX29zGzGtAG7HrDJUREh2IzRfpdNHuwFJdc81sBUH9hFyztJsBOg0dc1gb11CdirG5jqA3uLEht8bSPZ9YE9o4unr22WSFNqAnsq5Rs+m1LzGmTfO1ebUh3s9VTjBWlKDWC/1EWCM16/SbMpA4K9piRUa3qvYVZNKQb76QLJ9t+3amCqD+zlBWB7K2R+I9n1gf1IyTU7NzDVB/bSEsndvTEB6wO7yF/tTb49cKEM7UaVDA72o7jVGAqo3HbARbY2ersGsF/BRe7ECwg+2HIKjsKnWUCoabr+x5Kp+sGN3q4P7NsKwoT9+QPJj9luSh/cew/giGLjgEkfPrUtjrqz8ZUMCHaG2/pwfcHCr/9+bKNG6uHhAxelWhSoA3A48OZe9v01JT/KMsExNC7LCatNcGHDs4ETcjagNqVHyfasA5cUqBJ/3eeagXJwa8RHq16GW+DNcmaTHZvgnFRguTSlItgevJU47tEkJ3zY+7gX4zYDdRrp7n8N0sf6fc+sk7RAurfF0cp3GunuH2xvZTyE45HOC473gJ+FixEcbQZLGJQoYGeb6Ix0IQr4s010soB0/A2JYdW2pzkTGO8JvKBAuj24C4GvFTDsvBFKFghnWgWDbuQuM3ELC/O6kLtkOCfVLWw6BFy95nHYDOc5Ld36l3bZEbsG+ELBBtPQR/ILXmNOz95AQC/EpV95yD4Xls6uu3DaZRFD5WgXLr/7JW0REeNuiofnKTwuhxa0LemYCLvXHd2o5nwPzcHtkZxXMFX36uR2HB3QuknI2EAPVHNH4EhiwrZ7vqyXccuIy/MwSCvshn3WfCIU0BP5qf7+uAQ70zdBG9wDfbiZxWGuhSQYr6bxGtlC2mtgpe+x3wNfDRZ+Kch5cCBwIy6jUrvmBBbjyVa50QTumqBNaYGAbjVozgPPx3pJCR/rxoCPdc/gt8kk1M+h3j2nApuwb/uiIr3dayKJKRVIyv2g+bykIwsqP5GPkL56tqSfVyC89cL3o25GQj+Mu7Ml3VkCeDhSLwkSSEx0eudQIPaTtLQCWbkH+uqytAL95juYK+meCjT8HvQHJX1ogtLwEwE0S9J5Qd2rAH2dvfVdM48M0vtzJd1RoULhucsk7RbdK5sgtPtIOlbSwznC0i1vzZUGdFImQIOmTpkp6bcVEgGF+m6tpB9I2jlnEE6HPJgmOR2cSPqYpD9VTCoRJs64OLhHab2pIVdNZg8tk4a4EWsl/VTSwgLrJ6sB/CRKMBSemyvpNEl3RUJRtf6Lc9jjux6DJt9MAwP/DBznX6uALDfegZZFnHvXAL/BkVepwBeT9MB4ljcfmIMjvP048NEgw2qnZN4Rsio/h2Mzuzbg0NagzPD9pIxdhCPz3qNiAzoRiDKwbzd/+X029X2pz7ptjdubv4/53t8X7GgOCQ7TkoldFoTpfRoX096zl7POtLKtIOTh27jscgTewKRCisI8QvSncMzzy22NdDWOQml95DKYZpK7jflxdsBlzZtV8KwqdfJrsxuAb9nR7tedXHcO39DP+2Ecfd07egA9THCc1ORfUSTBScXrfcffCpxtqm4gurphJEwO1cpmOMrRs3HRVGU5GIvA75UWrp/M1vHb9RjwTeBn0Ztb2xrksKR8G1zC5FMCR01ZxlHGiDq0E+ntFbYkeBGOUjSpi6Fz2KnA43zr8wzwE3HcVATSnowR8OF+/FBNLcVlab0UeH6Q9LHjBXYR6DPMN3wCjlNwajT6qybwYzUUq681wO9wkWA3BAwU2TBSC4wV2HnZjHzZFUdNehjwnmBHcZ5lEO/rSXJ2RKhk3/2zZlb+2nzvKyKLamhhGWMNdizpMcXGfFzSikX2uQCXYTodIJHPSuCfwJ24lF13A8/khEQPPUnGeIEdz0JfRxAblC1t5X6BHduZ3t8KF2oxEtBNv2g2+CrgCZt4PAI8aeeqPnNo5f/8HddkXfEUjQAAAABJRU5ErkJggg==");
+  /* The box is wider than the artwork on purpose. `contain` keeps the loop
+     at .72em tall and centres it, and the extra width buys back what a
+     narrower icon than the two arrow glyphs would cost: without it the
+     reset button sits 1.8px narrower than undo and redo beside it. */
+  width: .81em;
+  height: .72em;
+  vertical-align: -.09em;
+  transform: scaleX(-1);
+}
+.chip.changes:hover:not(:disabled) { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
+
+/* A screen's single button has no verdict to record, so it never stays marked.
+   It still starts as an outline and fills the same way the three do, because
+   two page kinds that share a shell should not press differently. */
+.chip.primary { border-color: var(--accent); color: var(--accent-ink); }
+.chip.primary:hover:not(:disabled) { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
+
+/* Whichever verdict was last used stays marked, so a glance says what you told
+   Claude without reading the answer back. It fills rather than wearing a ring:
+   the ring sat outside the pill and read as a focus artefact. */
+.chip.approve[aria-pressed="true"] { background: var(--ok); border-color: var(--ok); color: #fff; }
+.chip.decline[aria-pressed="true"] { background: var(--skip); border-color: var(--skip); color: #fff; }
+.chip.changes[aria-pressed="true"] { background: var(--accent-ink); border-color: var(--accent-ink); color: #fff; }
+
+.btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) { background: var(--surface); }
+.btn:disabled { opacity: .4; cursor: default; }
+.btn.small { font-size: 12px; padding: 5px 10px; font-weight: 500; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #2a1608; }
+.btn.primary:hover:not(:disabled) { background: #e57a44; }
+.btn.danger { color: var(--skip); border-color: var(--line); }
+.btn.danger:hover:not(:disabled) { background: var(--skip-soft); border-color: var(--skip); }
+
+.ico { display: inline-block; }
+
+/* Mirrored so the pencil runs lower-left to upper-right, matching the note
+   control. One product, one pencil, facing one way. */
+.ico-pen { transform: scaleX(-1); }
+
+/* The message beside the verdict buttons. The box is a clip whose width
+   setStatus animates to the measured text, so the note field (flex: 1) gives
+   way in step. Closed, it also hands back the row's gap. The text slides
+   in from the right with a fade and leaves to the right the same way. */
+#status {
+  flex: none;
+  overflow: hidden;
+  width: 0;
+  margin-left: calc(-1 * var(--gap, 10px));
+  font-size: 12px;
+  color: var(--ok);
+  white-space: nowrap;
+  transition: width .22s cubic-bezier(.2, .7, .3, 1), margin-left .22s cubic-bezier(.2, .7, .3, 1);
+}
+#status.is-on { margin-left: 0; }
+#status.bad { color: var(--skip); }
+#status .status-text {
+  display: inline-block;
+  vertical-align: middle;
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity .22s ease, transform .22s cubic-bezier(.2, .7, .3, 1);
+}
+#status.is-on .status-text { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  #status { transition: none; }
+  #status .status-text { transform: none; transition: opacity .15s linear; }
+}
+
+/* --------------------------------------------------------------- tooltip */
+
+/* The page's own tooltip: its ink as the ground and its panel colour as the
+   text, so it reads as part of the page rather than the browser's grey box.
+   It drops in from 4px above (or rises from below when it sits over the
+   footer) while it fades, and the arrow points at the middle of whatever it
+   names, which --arrow-x carries from shell.js. */
+.tip {
+  position: fixed;
+  z-index: 10000;   /* above the bubble (9999), whose buttons carry tips too */
+  max-width: 280px;
+  padding: 6px 10px 7px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--panel);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.4;
+  letter-spacing: .01em;
+  box-shadow: 0 6px 18px rgba(42, 38, 34, .18);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+.tip.is-above { transform: translateY(4px); }
+.tip.is-on { opacity: 1; transform: none; }
+.tip::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: calc(var(--arrow-x, 50%) - 4px);
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 1px;
+}
+.tip.is-above::before { top: auto; bottom: -4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tip, .tip.is-above { transform: none; transition: opacity .1s linear; }
+}
+
+/* --------------------------------------------------------------- narrow */
+
+/* Both panels stay one row down to about 560px: the title gives way with an
+   ellipsis and the eyebrow goes. */
+@media (max-width: 820px) {
+  .sec { padding-left: 16px; padding-right: 16px; }
+}
+
+@media (max-width: 720px) {
+  header { gap: 8px; padding-left: 12px; padding-right: 12px; }
+  .controls { gap: 8px; }
+  header.title-peek .controls-slot { margin-left: -8px; }
+  header .eyebrow { display: none; }
+  footer { padding-left: 12px; padding-right: 12px; }
+  .verdict-row { --gap: 6px; }
+}
+
+/* ------------------------------------------------------------ tables */
+
+/* One toolbar for the page, fixed above whichever table has focus. It sits
+   outside #doc so no quote search can ever match its labels. */
+.tbl-bar {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 4px 6px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
+  font-size: 12px;
+}
+.tbl-bar[hidden] { display: none; }
+.tbl-group { display: flex; gap: 3px; align-items: center; }
+.tbl-group + .tbl-group { padding-left: 10px; border-left: 1px solid var(--line); }
+.tbl-label { color: var(--label); margin-right: 3px; }
+.tbl-btn {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  border-radius: 5px;
+  font: inherit;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+.tbl-btn:hover:not(:disabled) { background: var(--surface); }
+.tbl-btn:disabled { opacity: .35; cursor: default; }
+.tbl-btn[data-op$="remove"], .tbl-btn[data-op="table-kill"] { color: var(--skip); }
+
+/* Removed original content stays on the page, struck through, so it still
+   reads and a second click brings it back. */
+#doc tr[data-dropped] > td, #doc td[data-dropped], #doc th[data-dropped] {
+  text-decoration: line-through;
+  opacity: .45;
+}
+/* Cells with no original: the same orange as a rewrite, lighter. */
+#doc [data-new-cell] { background: rgba(240, 132, 78, .12); min-width: 3em; }
+#doc table[data-killed] { opacity: .4; text-decoration: line-through; }
+
+@media print {
+  header, footer, .orphans, .stale, .tbl-bar, .credit-tail { display: none; }
+  body { display: block; overflow: visible; }
+  #doc { overflow: visible; height: auto; }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "review-doc",
+  "version": "1.0.0",
+  "description": "Review Markdown documents and Claude's plans in the browser: comment, rewrite in place, approve or decline, then paste the answer back.",
+  "author": { "name": "Filip Muszynski", "url": "https://github.com/filmuszynski" },
+  "homepage": "https://github.com/filmuszynski/skills",
+  "license": "MIT"
+}

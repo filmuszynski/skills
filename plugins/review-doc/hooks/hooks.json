@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/render_plan.py\" 2>/dev/null || python \"${CLAUDE_PLUGIN_ROOT}/hooks/render_plan.py\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

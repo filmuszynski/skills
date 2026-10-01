@@ -1,0 +1,42 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        python: ["3.13"]
+        include:
+          - os: ubuntu-latest
+            python: "3.10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run the tests
+        run: python plugins/review-doc/tests/run.py
+        env:
+          PYTHONIOENCODING: utf-8
+
+  package-opener:
+    name: package the VS Code opener
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Package
+        working-directory: plugins/review-doc/vscode-opener
+        run: npx --yes @vscode/vsce package -o review-doc-opener.vsix

@@ -1,0 +1,24 @@
+# Session context never goes into a public repo, curated captures included.
+sessions/
+.claude/settings.local.json
+.claude/hooks/
+# Test scratch (REVIEW_DOC_HOME points here during tests)
+plugins/review-doc/tests/.tmp/
+# Python
+__pycache__/
+*.pyc
+# Build output
+*.vsix
+node_modules/
+# OS / editor
+.DS_Store
+.vscode/*
+.idea/
+*.log
+# Tool caches written by the author's editor hooks
+.impeccable/
+# Screenshot scratch (make.py renders here)
+docs/screenshots/.work/
+# Specs and phase plans reference the author's private workspace; they live there.
+docs/specs/
+docs/plans/
