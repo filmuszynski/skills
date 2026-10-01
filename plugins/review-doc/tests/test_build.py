@@ -211,14 +211,15 @@ def _main_json(argv):
 
 
 @test
-def test_html_files_are_refused_until_v1_1():
+def test_markdown_kinds_point_html_files_to_the_html_kind():
     h = use_home(new_home())
     for name in ("page.html", "page.HTM"):
         src = write(os.path.join(h, name), "<h1>x</h1>\n")
-        code, res = _main_json(["doc", src])
-        assert code == 4, (name, code)
-        assert res == {"ok": False, "reason": "unsupported",
-                       "message": "HTML review arrives in review-doc 1.2."}, res
+        for kind in ("doc", "plan", "screen"):
+            code, res = _main_json([kind, src])
+            assert code == 4, (name, kind, code)
+            assert res == {"ok": False, "reason": "unsupported",
+                           "message": "HTML pages are reviewed with the html kind: build_screen.py html <file>."}, res
     pd = os.path.join(h, "pages")
     assert not os.path.isdir(pd) or os.listdir(pd) == []
 
@@ -231,7 +232,8 @@ def test_other_file_types_are_refused_with_the_supported_ones():
         for kind in ("doc", "plan", "screen"):
             code, res = _main_json([kind, src])
             assert code == 4, (name, kind, code)
-            assert res["message"] == "review-doc reviews Markdown files (.md, .markdown).", res
+            assert res["message"] == build_screen.SUPPORTED, res
+    assert build_screen.SUPPORTED == "review-doc reviews Markdown files (.md, .markdown) and HTML pages (.html, .htm)."
 
 
 @test

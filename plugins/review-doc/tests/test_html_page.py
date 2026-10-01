@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 """The HTML page kind: its layout, its script, and the html CLI kind (1.2)."""
+import contextlib
+import io
 import json
 import os
+import shutil
 import subprocess
 
-from harness import test, new_home, HERE, fixture
+from harness import test, new_home, use_home, patch, HERE, fixture
 
+import build_screen
 import layout_doc
 import layout_html
 import pages
+import settings
 import shell
 
 
@@ -139,3 +144,100 @@ def test_doc_page_render_is_unchanged_by_the_single_pass():
     old = old.replace("__SHORT__", shell._esc(shell.short_title(built["title"], cap=400)))
     old = old.replace("__TITLE__", shell._esc(built["title"]))
     assert new == old
+
+
+def _main_json(argv):
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = build_screen.main(argv)
+    return code, json.loads(out.getvalue())
+
+
+def _copy_single(home, name="index.html"):
+    d = os.path.join(home, "site")
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, name)
+    shutil.copy(_fixture_path("site_single.html"), p)
+    return p
+
+
+@test
+def test_build_html_writes_a_frame_page():
+    h = use_home(new_home())
+    p = _copy_single(h)
+    res = build_screen.build("html", p)
+    assert res["kind"] == "html" and res["new"] is True and res["sections"] == 0, res
+    assert pages.HTML_SLUG_RE.match(res["slug"]) and res["slug"].startswith("site-index-"), res["slug"]
+    meta = pages.read_meta(res["path"])
+    assert meta["target"]["type"] == "file" and meta["target"]["entry"] == "index.html"
+    assert meta["sourceMtime"] == int(os.path.getmtime(p) * 1000)
+    again = build_screen.build("html", os.path.join(h, "site", ".", "index.html"))
+    assert again["slug"] == res["slug"] and again["new"] is False, "every spelling of the path is one page"
+
+
+@test
+def test_html_slug_is_always_a_dns_label():
+    for name in ("Über Uns.html", "a_b.c.HTM", "---.html", ("x" * 90) + ".html"):
+        s = build_screen.html_slug(os.path.join(new_home(), "Some_Folder", name))
+        assert pages.HTML_SLUG_RE.match(s), s
+        assert "--" not in s, s
+
+
+@test
+def test_html_cli_needs_the_server():
+    h = use_home(new_home())
+    p = _copy_single(h)
+    code, res = _main_json(["html", p])  # the harness sets REVIEW_DOC_NO_SERVER
+    assert code == 5, (code, res)
+    assert res["ok"] is False and res["reason"] == "needs-server"
+    assert res["message"].startswith("HTML review needs the local review server: "), res
+    code, res = _main_json(["html", p, "--no-server"])
+    assert code == 5 and res["reason"] == "needs-server"
+    pd = os.path.join(h, "pages")
+    assert not os.path.isdir(pd) or os.listdir(pd) == [], "nothing is written without a server"
+
+
+@test
+def test_html_cli_hands_over_the_server_link():
+    h = use_home(new_home())
+    p = _copy_single(h)
+    with patch(build_screen.launch, "ensure_server", lambda *a, **k: (4321, None)):
+        code, res = _main_json(["html", p])
+    assert code == 0, res
+    assert res["url"] == "http://127.0.0.1:4321/review/%s.html" % res["slug"] and res["server"] is True
+
+
+@test
+def test_html_refusals():
+    h = use_home(new_home())
+    p = _copy_single(h)
+    local = "HTML review opens local files and localhost only."
+    later = "Reviewing a running localhost dev server is not built yet."
+    for argv, msg in ((["html", "https://example.com/"], local),
+                      (["html", "http://192.168.1.5:8080/"], local),
+                      (["html", "http://localhost.evil.com/"], local),
+                      (["html", "file:///" + p.replace("\\", "/").lstrip("/")], local),
+                      (["html", "http://[::1"], local),
+                      (["html", "http://localhost:5173/"], later),
+                      (["html", "http://[::1]:5173/x"], later)):
+        code, res = _main_json(argv)
+        assert code == 4 and res.get("message") == msg, (argv, code, res)
+    md = os.path.join(h, "notes.md")
+    with open(md, "w", encoding="utf-8", newline="") as fh:
+        fh.write("# x\n")
+    code, res = _main_json(["html", md])
+    assert code == 4 and res["message"] == build_screen.SUPPORTED, res
+    code, res = _main_json(["html", p, "--slug", "Bad_Slug"])
+    assert code == 2 and "invalid slug" in res["error"], res
+    code, res = _main_json(["html", p, "--out", os.path.join(h, "out")])
+    assert code == 2 and "--out" in res["error"], res
+    code, res = _main_json(["html", os.path.join(h, "missing.html")])
+    assert code == 1, res
+
+
+@test
+def test_html_switch_off_refuses_with_exit_3():
+    h = use_home(new_home())
+    settings.set_value("html", "off", h)
+    code, res = _main_json(["html", _copy_single(h)])
+    assert code == 3 and res == {"ok": False, "reason": "disabled", "setting": "html"}, res
