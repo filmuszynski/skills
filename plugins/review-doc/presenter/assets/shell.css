@@ -176,6 +176,12 @@ header > .doc-title { flex-shrink: 1; }
    instead of jumping. */
 .controls { --ctl-gap: 14px; }
 #cycle-scope { position: relative; width: 30px; padding: 0; display: inline-grid; place-items: center; }
+/* No frame either: the icon is drawn in the edit orange, the colour of the
+   current round's marks, and hover lays the same orange plate as the edit
+   counter. The id beats .iconbtn, so its border and hover need no !important. */
+#cycle-scope { border-color: transparent; color: var(--accent-ink); transition: background-color .15s ease; }
+#cycle-scope:hover:not(:disabled) { background: rgba(240, 132, 78, .16); }
+#cycle-scope:active:not(:disabled) { background: rgba(240, 132, 78, .28); }
 #cycle-scope.is-new { animation: scope-in .2s ease; overflow: hidden; }
 #cycle-scope[hidden] { display: none; }
 #cycle-scope .ico { grid-area: 1 / 1; width: 14px; height: 14px; fill: none; stroke: currentColor;
@@ -198,7 +204,7 @@ header > .doc-title { flex-shrink: 1; }
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  border: 1px solid var(--line);
+  border: 0;
   background: transparent;
   color: var(--label);
   border-radius: 6px;
@@ -209,6 +215,7 @@ header > .doc-title { flex-shrink: 1; }
   padding: 5px 7px 4px;
   cursor: pointer;
   white-space: nowrap;
+  transition: background-color .15s ease;
 }
 
 .counter .ico {
@@ -227,22 +234,23 @@ header > .doc-title { flex-shrink: 1; }
 .counter:not(:disabled) { font-weight: 600; }
 
 /* Each counter wears its own mark's colour, so the chip and the highlight it
-   jumps to are obviously the same thing. The underline carries the exact mark
-   colour; the text uses a darker ink of the same hue, because the mark colours
-   are decorative and would fail the contrast floor at 11px. */
-.counter[data-kind="comments"] { border-bottom: 2px solid var(--mark); }
+   jumps to are obviously the same thing. There is no frame: the symbol and the
+   number carry the colour, in the darker ink of the mark's hue, because the
+   mark colours are decorative and would fail the contrast floor at 11px.
+   Hover lays a soft plate of the same hue behind the counter. */
+.counter[data-kind="comments"] { --tint: 217, 166, 46; }
 .counter[data-kind="comments"]:not(:disabled) { color: var(--mark-ink); }
-.counter[data-kind="comments"]:hover:not(:disabled) { background: rgba(217, 166, 46, .18); border-color: var(--mark); }
 
-.counter[data-kind="edits"] { border-bottom: 2px solid var(--accent); }
+.counter[data-kind="edits"] { --tint: 240, 132, 78; }
 .counter[data-kind="edits"]:not(:disabled) { color: var(--accent-ink); }
-.counter[data-kind="edits"]:hover:not(:disabled) { background: rgba(240, 132, 78, .18); border-color: var(--accent); }
 
 /* The total is a tally, not a mark. It stays in the quiet label colour so the
    two coloured counters keep their meaning. */
-.counter[data-kind="all"] { border-bottom: 2px solid var(--line); }
+.counter[data-kind="all"] { --tint: 111, 103, 92; }
 .counter[data-kind="all"]:not(:disabled) { color: var(--label); font-weight: 500; }
-.counter[data-kind="all"]:hover:not(:disabled) { background: var(--surface); border-color: var(--label); color: var(--ink); }
+
+.counter:hover:not(:disabled) { background: rgba(var(--tint), .16); }
+.counter:active:not(:disabled) { background: rgba(var(--tint), .28); }
 
 /* Where a jump landed. It has to survive being fired at the same element
    twice in a row, hence the reflow before the class goes back on. */

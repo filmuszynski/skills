@@ -6,6 +6,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-10-01
+
+### Changed
+- The three counters in the header have no frame and no bar underneath any more. The symbol
+  and the number carry the counter's colour (yellow for comments, orange for edits, grey for
+  the total), and hover lays a soft plate of that colour behind it.
+- The round button has no frame either. Its icon is drawn in the edit orange, with an
+  orange plate on hover.
+
 ## [1.1.2] - 2026-10-01
 
 ### Changed
