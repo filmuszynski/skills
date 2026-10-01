@@ -355,6 +355,8 @@
   function resetAll() {
     if (!feedbackCount() && !state.data.verdict && !hasRounds()) return;
     state.data = emptyData();
+    /* No earlier rounds are left to step through. */
+    state.ui.scope = "current";
     closeBubble();
     applyDataToDoc();
     paintTableBar();
@@ -2621,6 +2623,9 @@
   function finish(kind) {
     if (kind) {
       state.data.verdict = kind;
+      /* A change request copied earlier and then overruled by approving or
+         declining must not carry its pending round into the next build. */
+      if (kind === "approve" || kind === "decline") state.data.pending = null;
       syncVerdict();
       save("verdict");
     }

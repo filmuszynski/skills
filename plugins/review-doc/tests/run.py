@@ -2053,6 +2053,46 @@ def test_scope_button_markup_and_behaviour():
     assert "#cycle-scope" in c and ".counter, .modes, header .iconbtn { height: 26px; }" in c
 
 
+@test
+def test_reset_puts_the_scope_back_on_this_round():
+    src = shell._asset("shell.js")
+    ra = fn_body_run(src, "resetAll")
+    assert 'state.ui.scope = "current";' in ra
+    assert ra.index('state.ui.scope = "current";') < ra.index("updatePrompt();"), "repainted via updatePrompt"
+
+
+def _finish_fn():
+    """The top-level finish(kind); shell.js also has a nested finish() earlier."""
+    src = shell._asset("shell.js")
+    return fn_body_run(src[src.index("  function finish(kind)"):], "finish")
+
+
+@test
+def test_approve_and_decline_clear_a_stale_pending():
+    import subprocess
+    out = {}
+    for kind in ("approve", "decline", "changes"):
+        prog = _finish_fn() + """
+        var D = {meta: {sourceMtime: 100}}, atSave = "unset";
+        var state = {data: {verdict: "", pending: {sentAt: 1, sourceMtime: 50}}};
+        var FINISH_COPY = {approve: {}, decline: {}, changes: {}};
+        function syncVerdict() {}
+        function save() { atSave = state.data.pending; }
+        function updatePrompt() {}
+        function buildPrompt() { return "x"; }
+        function copyText(t, then) { then(false); }
+        function persist() {}
+        function openFinish() {}
+        finish(%s);
+        process.stdout.write(JSON.stringify(atSave));
+        """ % json.dumps(kind)
+        r = subprocess.run(["node", "-e", prog], capture_output=True, timeout=30)
+        assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+        out[kind] = json.loads(r.stdout.decode("utf-8"))
+    assert out["approve"] is None and out["decline"] is None, out
+    assert out["changes"] == {"sentAt": 1, "sourceMtime": 50}, "changes keeps it until the copy lands"
+
+
 def _fake_el(prev=False, current_kind=False, in_prev=False):
     return ("{hasAttribute: function (a) { return a === 'data-prev' && %s; },"
             " matches: function () { return %s; },"
