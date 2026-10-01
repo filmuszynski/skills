@@ -6,6 +6,27 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-01
+
+### Added
+- Approve, Decline and Request changes open a box over the dimmed, blurred page
+  that says what was copied and what to do next, with a Copy prompt again link
+  under the buttons. Close page asks twice, like Reset.
+- After Request changes the page waits for Claude's revision and reloads itself
+  once the page has been rendered again and the file has stopped changing. Without
+  a new render it reloads after 30 seconds of quiet.
+- Comments and rewrites from earlier rounds stay on the page as an underline with a
+  read-only bubble. A new button left of the counters switches them between this
+  round, earlier rounds and every round. Earlier rounds never go back into the prompt.
+- Documents show their `**Key:** value` lines in the At a glance box, like plans,
+  and comments on it reach the prompt.
+
+### Changed
+- A table whose header cells are all empty is shown without its header bar, and its
+  first column reads as the header column, as in a plan's At a glance box.
+- The Request changes prompt says the open page reloads by itself.
+- Reset also clears earlier rounds.
+
 ## [1.0.3] - 2026-10-01
 
 ### Changed
