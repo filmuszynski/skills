@@ -410,7 +410,8 @@ def test_a_comment_survives_an_edit_to_its_paragraph():
     """
     js = io.open(os.path.join(PRESENTER, "assets", "shell.js"), encoding="utf-8").read()
     assert "function unwrapMarksIn(" in js
-    assert 'el.querySelectorAll("mark.edited, mark.has-comment")' in js,         "a comment mark inside a focused contenteditable swallows typing"
+    # Earlier-round marks (1.1) join the selector after these two.
+    assert 'el.querySelectorAll("mark.edited, mark.has-comment' in js,         "a comment mark inside a focused contenteditable swallows typing"
     i = js.index('el.addEventListener("blur"')
     handler = js[i:i + 260]
     assert "applyDataToDoc();" in handler,         "blur must re-anchor every comment, not just redraw this element"
@@ -1510,9 +1511,9 @@ def fn_body_run(src, name):
     return src[i:j if j > 0 else len(src)]
 
 
-def run_js(names, expr):
+def run_js(names, expr, prelude=""):
     import subprocess
-    src = "\n".join(js_function(n) for n in names)
+    src = prelude + "\n" + "\n".join(js_function(n) for n in names)
     src += "\nprocess.stdout.write(JSON.stringify(%s));" % expr
     out = subprocess.run(["node", "-e", src], capture_output=True, timeout=30)
     assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
@@ -1903,6 +1904,62 @@ def test_forgotten_page_is_not_written_back():
     assert "forgotten = true;" in fn_body_run(src, "forgetPage")
     assert fn_body_run(src, "onFinishCancel").split("\n")[1].strip() == "forgotten = false;"
     assert src.count("function forgetPage(") == 1
+
+
+# The page-level vars the offset functions read, with the same members as the
+# INVISIBLE class in shell.js (written escaped here; shell.js has them literal).
+OFFSET_PRELUDE = (r"var INVISIBLE = /[\s­​-‍⁠﻿]/;"
+                  "\nvar BRIDGE_WORDS = 2, BRIDGE_CHARS = 24; var DIFF_CELLS = 250000;")
+OFFSET_FNS = ["squeeze", "tokenize", "diffTokens", "buildRuns", "coalesceRuns", "isBridge", "runOffsets"]
+
+
+@test
+def test_offset_prelude_matches_the_page_invisible_class():
+    src = shell._asset("shell.js")
+    line = [l for l in src.split("\n") if l.strip().startswith("var INVISIBLE = ")][0]
+    members = sorted(hex(ord(c)) for c in line if ord(c) > 127)
+    assert members == ["0x200b", "0x200d", "0x2060", "0xad", "0xfeff"], members
+    out = run_js(["squeeze"], 'squeeze("a b\\u00adc\\u200bd\\u200ce\\u200df\\u2060g\\ufeffh\\ni")',
+                 prelude=OFFSET_PRELUDE)
+    assert out == "abcdefghi", out
+
+
+@test
+def test_run_offsets_point_into_the_new_text():
+    out = run_js(OFFSET_FNS, """(function () {
+      return runOffsets("Plant the beans in May.", "Plant the beans early in the spring."); })()""",
+                 prelude=OFFSET_PRELUDE)
+    # squeeze("Plant the beans ") == "Plantthebeans" (13 chars): the change starts there.
+    assert out and out[0]["s"] == 13, out
+    assert "early" in out[0]["now"] and "May" in out[0]["was"], out
+
+
+@test
+def test_pure_deletion_has_no_offsets():
+    out = run_js(OFFSET_FNS, 'runOffsets("one two three", "one three")', prelude=OFFSET_PRELUDE)
+    assert out == [], out
+
+
+@test
+def test_earlier_marks_draw_after_current_and_open_read_only():
+    src = shell._asset("shell.js")
+    ap = fn_body_run(src, "applyDataToDoc")
+    assert ap.index("Object.keys(state.data.marks).forEach(anchorMark)") < ap.index("anchorEarlier()")
+    um = fn_body_run(src, "unwrapMarks")
+    assert "mark.prev-comment" in um and "mark.prev-edit" in um and "mark.prev-pill" in um
+    ui = fn_body_run(src, "unwrapMarksIn")
+    assert "mark.prev-comment" in ui and "mark.prev-edit" in ui
+    sp = fn_body_run(src, "showEarlier")
+    assert '"Earlier round"' in sp and "Delete" not in sp and "Revert" not in sp
+    ae = fn_body_run(src, "anchorEarlier")
+    assert '"earlier edit"' in ae and '"earlier table change"' in ae
+    assert "locateQuote(sec || docEl, ed.neu" in ae, "edits anchor inside their own new text"
+    st = fn_body_run(src, "start")
+    assert st.index('closest("[data-prev]")') < st.index('closest("mark.has-comment")'), \
+        "an earlier mark is checked before the current-comment branch"
+    c = shell._asset("shell.css")
+    assert "mark.prev-comment" in c and "mark.prev-edit" in c
+    assert "mark.has-comment mark.prev-comment" in c and "mark.edited mark.prev-edit" in c
 
 
 def main():

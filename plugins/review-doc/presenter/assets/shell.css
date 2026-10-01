@@ -888,6 +888,43 @@ mark.edited-cut::after {
   vertical-align: super;
 }
 
+/* Earlier rounds: the underline of their kind, no fill, so the current round
+   stays the loud one. A light tint on hover, half the current marks' resting
+   fill, says they open. */
+mark.prev-comment, mark.prev-edit {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  border-bottom: 2px solid var(--mark);
+  transition: background-color .15s ease;
+}
+mark.prev-edit { border-bottom-color: var(--accent); }
+mark.prev-comment:hover, mark.prev-comment.is-open { background: rgba(217, 166, 46, .11); }
+mark.prev-edit:hover, mark.prev-edit.is-open { background: rgba(240, 132, 78, .13); }
+/* Nested inside a current mark on the same words, the current fill wins and
+   the earlier one only adds its underline. A current comment added later
+   lands INSIDE an earlier mark instead; it keeps its own fill either way. */
+mark.has-comment mark.prev-comment, mark.has-comment mark.prev-edit,
+mark.edited mark.prev-comment, mark.edited mark.prev-edit { background: transparent; }
+
+/* The section pill of an earlier mark that has nowhere to sit: the current
+   round's pill in outline. Empty, the label is drawn here. */
+mark.prev-pill {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  text-transform: none;
+  letter-spacing: 0;
+  background: transparent;
+  color: var(--label);
+  cursor: pointer;
+}
+mark.prev-pill::before { content: attr(data-label); }
+mark.prev-pill:hover, mark.prev-pill.is-open { border-color: var(--label); }
+@media (prefers-reduced-motion: reduce) { mark.prev-comment, mark.prev-edit { transition: none; } }
+
 /* Fallback for a paragraph too large to diff. The whole element is marked, and
    this is now the only case where that still happens. */
 .chg-whole {

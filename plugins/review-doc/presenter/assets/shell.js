@@ -469,7 +469,7 @@
      paragraphs: extractContents splits both paragraphs and puts the pieces
      inside an inline element, which tears the layout apart and paints no
      highlight. Whitespace-only nodes between blocks are left alone. */
-  function wrapRange(range, id) {
+  function wrapRange(range, id, cls, attr) {
     var root = range.commonAncestorContainer;
     var nodes = root.nodeType === 3 ? [root] : textNodesOf(root);
     var first = null;
@@ -483,8 +483,8 @@
       if (s > 0) part = part.splitText(s);
       if (e - s < part.nodeValue.length) part.splitText(e - s);
       var m = doc.createElement("mark");
-      m.className = "has-comment";
-      m.setAttribute("data-mark", id);
+      m.className = cls || "has-comment";
+      m.setAttribute(attr || "data-mark", id);
       part.parentNode.insertBefore(m, part);
       m.appendChild(part);
       if (!first) first = m;
@@ -493,7 +493,8 @@
   }
 
   function unwrapMarks() {
-    var marks = docEl.querySelectorAll("mark.has-comment, mark.tbl-orphan");
+    var marks = docEl.querySelectorAll(
+      "mark.has-comment, mark.tbl-orphan, mark.prev-comment, mark.prev-edit, mark.prev-pill");
     for (var i = 0; i < marks.length; i++) {
       var m = marks[i], p = m.parentNode;
       while (m.firstChild) p.insertBefore(m.firstChild, m);
@@ -535,6 +536,7 @@
 
     Object.keys(state.data.marks).forEach(anchorMark);
     Object.keys(state.data.tables).forEach(anchorLostTable);
+    anchorEarlier();
 
     /* Sections and steps share one decision map and one kind of control. */
     var decs = docEl.querySelectorAll(".dec");
@@ -588,6 +590,107 @@
     m.setAttribute("data-tip", "Table change that no longer fits this table; it still goes out in the prompt");
     var num = tag.querySelector(".sec-num");
     tag.insertBefore(m, num ? num.nextSibling : tag.firstChild);
+  }
+
+  /* ------------------------------------------------------ earlier rounds */
+
+  /* Rounds Claude already acted on. They stay on the page as an underline and
+     a read-only bubble, drawn after the current round so a current mark on the
+     same words keeps its fill. Never sent again. */
+  var prevInfo = {};
+
+  /* Where each changed run of a rewrite sits in the NEW text, counted in the
+     squeezed coordinates locateQuote uses. A run that only removed words has no
+     new text to sit on and is left out. */
+  function runOffsets(alt, neu) {
+    var ops = diffTokens(tokenize(alt), tokenize(neu));
+    if (!ops) return [];
+    var runs = coalesceRuns(buildRuns(ops)), out = [], pos = 0;
+    for (var i = 0; i < runs.length; i++) {
+      var r = runs[i];
+      if (r.same) { pos += squeeze(r.text).length; continue; }
+      var len = squeeze(r.added).length;
+      if (len) out.push({ s: pos, e: pos + len, was: r.removed, now: r.added });
+      pos += len;
+    }
+    return out;
+  }
+
+  /* Empty like the current round's section pill, so its label never becomes
+     text a later search could match. */
+  function prevPill(sec, key, label) {
+    var tag = sec ? sec.querySelector(".sec-tag") : null;
+    if (!tag) return;
+    var m = doc.createElement("mark");
+    m.className = "prev-pill";
+    m.setAttribute("data-prev", key);
+    m.setAttribute("data-label", label);
+    var num = tag.querySelector(".sec-num");
+    tag.insertBefore(m, num ? num.nextSibling : tag.firstChild);
+  }
+
+  function anchorEarlier() {
+    prevInfo = {};
+    (state.data.rounds || []).forEach(function (round, ri) {
+      var r = "r" + ri + ":";
+      Object.keys(round.marks || {}).forEach(function (id) {
+        var mk = round.marks[id], sec = mk.sec ? secEl(mk.sec) : null, key = r + id;
+        prevInfo[key] = { kind: "comment", quote: mk.quote, comment: mk.comment };
+        var hit = sec ? locateQuote(sec, mk.quote, mk.occ || 0) : null;
+        if (hit && hit.range) wrapRange(hit.range, key, "prev-comment", "data-prev");
+        else if (sec) prevPill(sec, key, "comment");
+      });
+      Object.keys(round.edits || {}).forEach(function (eid) {
+        var ed = round.edits[eid], sec = ed.sec ? secEl(ed.sec) : null;
+        var base = sec ? locateQuote(sec || docEl, ed.neu, 0) : null;
+        var runs = base && !base.drift ? runOffsets(ed.alt, ed.neu) : [];
+        if (!runs.length) {
+          prevInfo[r + eid] = { kind: "edit", was: ed.alt, now: ed.neu };
+          prevPill(sec, r + eid, "earlier edit");
+          return;
+        }
+        /* The same offset locateQuote found for its exact match. The runs are
+           wrapped last to first: wrapping splits text nodes, and a split only
+           shortens the node to the LEFT of the cut, so the map positions of
+           the runs still to come stay true. */
+        var flat = flatten(sec), start = flat.text.indexOf(squeeze(ed.neu));
+        for (var k = runs.length - 1; k >= 0; k--) {
+          var run = runs[k], key = r + eid + ":" + k;
+          prevInfo[key] = { kind: "edit", was: run.was, now: run.now };
+          var range = rangeAt(flat, start + run.s, start + run.e);
+          if (range) wrapRange(range, key, "prev-edit", "data-prev");
+        }
+      });
+      Object.keys(round.tables || {}).forEach(function (tid) {
+        var st = round.tables[tid], sec = st.sec ? secEl(st.sec) : null;
+        prevInfo[r + tid] = { kind: "edit", was: "", now: "", table: true };
+        prevPill(sec, r + tid, "earlier table change");
+      });
+    });
+  }
+
+  function showEarlier(markEl) {
+    var key = markEl.getAttribute("data-prev"), info = prevInfo[key];
+    if (!info) return;
+    openBubble(markEl.getBoundingClientRect(), function (b) {
+      b.appendChild(mkEl("p", "bubble-label", "Earlier round"));
+      if (info.kind === "comment") {
+        b.appendChild(mkEl("p", "bubble-quote", truncate(info.quote || "", QUOTE_CAP)));
+        b.appendChild(mkEl("p", "bubble-body", info.comment || ""));
+      } else if (info.table) {
+        b.appendChild(mkEl("p", "bubble-body", "A table change from an earlier round."));
+      } else {
+        var was = info.was || "", now = info.now || "";
+        b.appendChild(mkEl("p", was.trim() ? "bubble-diff old" : "bubble-diff none",
+                           was.trim() ? was : "Nothing here before"));
+        b.appendChild(mkEl("p", "bubble-label", "Now"));
+        b.appendChild(mkEl("p", now.trim() ? "bubble-diff new" : "bubble-diff none",
+                           now.trim() ? now : "Removed"));
+      }
+    });
+    /* After openBubble, which clears every open state first. */
+    var pieces = docEl.querySelectorAll('[data-prev="' + cssEsc(key) + '"]');
+    for (var i = 0; i < pieces.length; i++) pieces[i].classList.add("is-open");
   }
 
   function paintDecision(el) {
@@ -1068,7 +1171,7 @@
   /* Every mark, not just the edit ones. A comment mark left inside a focused
      contenteditable swallows whatever is typed at its edge. */
   function unwrapMarksIn(el) {
-    var marks = el.querySelectorAll("mark.edited, mark.has-comment");
+    var marks = el.querySelectorAll("mark.edited, mark.has-comment, mark.prev-comment, mark.prev-edit");
     for (var i = 0; i < marks.length; i++) {
       var m = marks[i], p = m.parentNode;
       while (m.firstChild) p.insertBefore(m.firstChild, m);
@@ -2935,6 +3038,15 @@
 
       var note = t.closest ? t.closest(".note-btn") : null;
       if (note) { ev.preventDefault(); noteFor(note.getAttribute("data-for"), note); return; }
+
+      /* An earlier round's mark, unless a current comment sits around it: the
+         current one keeps its own bubble. In edit mode a click inside an
+         editable places the caret, so no bubble there either. */
+      var pm = t.closest ? t.closest("[data-prev]") : null;
+      if (pm && !(t.closest && t.closest("mark.has-comment"))
+          && !(state.mode === "edit" && pm.closest("[data-edit-id]"))) {
+        ev.preventDefault(); showEarlier(pm); return;
+      }
 
       var mk = t.closest ? t.closest("mark.has-comment") : null;
       if (mk) { ev.preventDefault(); showComment(mk); return; }
