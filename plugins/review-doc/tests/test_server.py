@@ -222,3 +222,53 @@ def test_early_answers_to_a_post_read_its_body_first():
             finally:
                 s.close()
             assert want in got.split(b"\r\n", 1)[0], (path, got[:40])
+
+
+def make_page(home, slug):
+    import paths
+    d = paths.pages_dir(home)
+    os.makedirs(d, exist_ok=True)
+    p = os.path.join(d, slug + ".html")
+    io.open(p, "w", encoding="utf-8", newline="").close()
+    return p
+
+
+@test
+def test_draft_request_and_cancel():
+    import drafts
+    h = new_home()
+    make_page(h, "spec-1")
+    with serving(h) as srv:
+        status, _, data = post_json(srv, "/api/draft", {"slug": "spec-1", "action": "request", "sourceMtime": 1000})
+        assert status == 200 and body(data) == {"ok": True, "draft": 1, "pending": True}, (status, data)
+        assert drafts.load("spec-1", home=h)["pending"] == {"sourceMtime": 1000}
+        status, _, data = post_json(srv, "/api/draft", {"slug": "spec-1", "action": "cancel"})
+        assert status == 200 and body(data) == {"ok": True, "draft": 1, "pending": False}, (status, data)
+        assert drafts.load("spec-1", home=h)["pending"] is None
+
+
+@test
+def test_draft_refusals():
+    h = new_home()
+    make_page(h, "spec-1")
+    with serving(h) as srv:
+        good = {"slug": "spec-1", "action": "request", "sourceMtime": 1000}
+        assert post_json(srv, "/api/draft", good, origin="http://evil.example")[0] == 403
+        assert post_json(srv, "/api/draft", good, headers={"Content-Type": "text/plain"})[0] == 415
+        assert post_json(srv, "/api/draft", dict(good, slug="nope"))[0] == 404
+        assert post_json(srv, "/api/draft", dict(good, slug="../x"))[0] == 404
+        assert post_json(srv, "/api/draft", dict(good, action="explode"))[0] == 400
+        assert post_json(srv, "/api/draft", dict(good, sourceMtime="soon"))[0] == 400
+        assert post_json(srv, "/api/draft", dict(good, sourceMtime=True))[0] == 400
+        assert post_json(srv, "/api/draft", "not json")[0] == 400
+        assert not os.path.isdir(os.path.join(h, "drafts")), "nothing refused writes a record"
+
+
+@test
+def test_draft_unwritable_record_answers_500():
+    h = new_home()
+    make_page(h, "spec-1")
+    io.open(os.path.join(h, "drafts"), "w", encoding="utf-8", newline="").close()
+    with serving(h) as srv:
+        status, _, data = post_json(srv, "/api/draft", {"slug": "spec-1", "action": "request", "sourceMtime": 1000})
+        assert status == 500 and body(data)["ok"] is False, (status, data)

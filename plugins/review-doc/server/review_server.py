@@ -28,6 +28,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PRESENTER = os.path.join(os.path.dirname(HERE), "presenter")
 sys.path.insert(0, PRESENTER)
 
+import drafts  # noqa: E402
 import pages  # noqa: E402
 import paths  # noqa: E402
 import settings  # noqa: E402
@@ -413,6 +414,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
             built = None
         return self._json(200, {"mtime": int(os.path.getmtime(src) * 1000), "page": built})
 
+    def _draft(self, data):
+        """The page sent or took back Request changes (1.1.5). Only for a page that
+        exists; the record behind its draft number is updated, nothing else."""
+        if not isinstance(data, dict):
+            return self._json(400, {"ok": False, "field": None, "error": "body must be an object"})
+        slug = data.get("slug")
+        path = self.app.page_path(slug if isinstance(slug, str) else "")
+        if path is None or not os.path.isfile(path):
+            return self._json(404, {"ok": False, "field": "slug", "error": "no such page"})
+        action = data.get("action")
+        if action == "request":
+            mtime = data.get("sourceMtime")
+            if not isinstance(mtime, int) or isinstance(mtime, bool):
+                return self._json(400, {"ok": False, "field": "sourceMtime", "error": "sourceMtime must be an integer"})
+        elif action != "cancel":
+            return self._json(400, {"ok": False, "field": "action", "error": "action must be request or cancel"})
+        try:
+            if action == "request":
+                rec = drafts.request(slug, mtime, home=self.app.home)
+            else:
+                rec = drafts.cancel(slug, home=self.app.home)
+        except OSError as exc:
+            self.app.log("draft record for %s not written: %s" % (slug, exc))
+            return self._json(500, {"ok": False, "field": None, "error": "draft record not written"})
+        if rec is None:
+            return self._json(200, {"ok": True, "draft": 1, "pending": False})
+        return self._json(200, {"ok": True, "draft": rec["draft"], "pending": rec["pending"] is not None})
+
     def do_POST(self):
         u = self._begin()
         if u is None:
@@ -436,7 +465,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.close_connection = True
             return self._json(413, {"ok": False, "field": None, "error": "body too large"})
         raw = self.rfile.read(length) if length > 0 else b""
-        if u.path not in ("/api/settings", "/api/stop"):
+        if u.path not in ("/api/settings", "/api/stop", "/api/draft"):
             return self._text(404, "Not found.\n")
         if (self.headers.get("Origin") or "").strip().lower() != "http://" + self._host():
             return self._json(403, {"ok": False, "field": None, "error": "Origin must match the page"})
@@ -452,6 +481,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.app.log("stop requested")
             self.app.stop()
             return
+        if u.path == "/api/draft":
+            return self._draft(data)
         try:
             return self._json(200, settings.apply(data, self.app.home))
         except settings.SettingError as exc:
