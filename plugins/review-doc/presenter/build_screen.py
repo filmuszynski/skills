@@ -25,6 +25,7 @@ import pathlib
 import re
 import sys
 from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -89,10 +90,29 @@ def is_url(target):
     return bool(URL_RE.match(target or ""))
 
 
+def is_file_url(target):
+    return is_url(target) and target.split(":", 1)[0].lower() == "file"
+
+
+def file_url_path(target):
+    """The local path a file: URL names. Only file:///... and file://localhost/...;
+    a file: URL on any other host is a network share, refused as not local."""
+    try:
+        u = urlsplit(target)
+        host = u.hostname or ""
+    except ValueError:
+        raise Unsupported(LOCAL_ONLY)
+    if host not in ("", "localhost") or not u.path:
+        raise Unsupported(LOCAL_ONLY)
+    return url2pathname(u.path)
+
+
 def check_html(target, slug=None):
     """Everything that can refuse an HTML render, checked before a server is started
     or a page written: the target, the slug, the setting."""
-    if is_url(target):
+    if is_file_url(target):
+        target = file_url_path(target)
+    elif is_url(target):
         try:
             u = urlsplit(target)
             host = u.hostname or ""
@@ -216,8 +236,17 @@ def _write(built, source, out_dir):
 
 def build_html(path, slug=None, out_dir=None):
     """Render the review page for a local HTML file. The page is the frame page; the
-    file itself reaches the frame through the review server's frame listener."""
+    file itself reaches the frame through the review server's frame listener.
+
+    meta.source keeps the path as given (it is the file Claude is told to edit); the
+    frame's root and entry come from the file it really is, so a linked index.html
+    is served from its own folder, with its own neighbours."""
+    if is_file_url(path):
+        path = file_url_path(path)
     check_html(path, slug)
+    real = os.path.realpath(os.path.abspath(path))
+    if os.path.splitext(real)[1].lower() not in HTML:
+        raise Unsupported(SUPPORTED)
     with io.open(path, encoding="utf-8", errors="replace") as fh:
         raw = fh.read()  # only the <title> is read from it
     source = os.path.abspath(path).replace("\\", "/")
@@ -226,6 +255,7 @@ def build_html(path, slug=None, out_dir=None):
         source=source,
         slug=slug or html_slug(path),
         generated_at=datetime.datetime.now().replace(microsecond=0).isoformat(),
+        target_path=real,
     )
     built["meta"]["sourceMtime"] = int(os.path.getmtime(path) * 1000)
     built["meta"]["version"] = paths.version()
@@ -254,6 +284,13 @@ def main(argv=None):
         return 2
 
     html_kind = args.kind == "html"
+    if html_kind and is_file_url(args.path):
+        # file:///.../index.html is a local path in URL form: from here on, a path.
+        try:
+            args.path = file_url_path(args.path)
+        except Unsupported as exc:
+            print(json.dumps({"ok": False, "reason": "unsupported", "message": exc.message}))
+            return 4
     # A URL is refused by check_html with its own message, not as a missing file.
     if not (html_kind and is_url(args.path)) and not os.path.isfile(args.path):
         print(json.dumps({"ok": False, "error": "no such file: " + args.path}))
@@ -268,7 +305,8 @@ def main(argv=None):
         if html_kind:
             check_html(args.path, args.slug)
             # An HTML page cannot fall back to file://: it needs the frame origin.
-            port, why = (None, "--no-server was given") if args.no_server else launch.ensure_server()
+            port, why = ((None, "--no-server was given") if args.no_server
+                         else launch.ensure_server(need_frame=True))
             if not port:
                 print(json.dumps({"ok": False, "reason": "needs-server",
                                   "message": "HTML review needs the local review server: %s" % why}))

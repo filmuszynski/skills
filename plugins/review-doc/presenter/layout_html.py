@@ -36,11 +36,14 @@ def page_title(text, fallback):
     return title or fallback
 
 
-def build(raw, source, slug, generated_at=""):
-    """An HTML file's text and path to the keyword arguments shell.render takes."""
+def build(raw, source, slug, generated_at="", target_path=None):
+    """An HTML file's text and path to the keyword arguments shell.render takes.
+    target_path, when given, is the file the frame serves (the source with links
+    resolved); the source path is still what the page shows and the answer names."""
     source_disp = source.replace("\\", "/")
-    root, entry = os.path.dirname(source_disp), os.path.basename(source_disp)
-    title = page_title(raw, entry)
+    served = (target_path or source).replace("\\", "/")
+    root, entry = os.path.dirname(served), os.path.basename(served)
+    title = page_title(raw, os.path.basename(source_disp))
     body = ('<div class="html-stage"><iframe id="review-frame" title="%s" '
             'referrerpolicy="no-referrer"></iframe></div>' % shell._esc(title))
     footer = (

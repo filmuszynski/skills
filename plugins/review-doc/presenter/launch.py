@@ -121,7 +121,10 @@ def version_key(v):
     return (nums, 0 if pre else 1)
 
 
-def ensure_server(home=None, wait=WAIT):
+def ensure_server(home=None, wait=WAIT, need_frame=False):
+    """need_frame: the caller renders an HTML page, so a server only counts when it
+    runs the frame listener on its port + 100 (1.2). One without is replaced like
+    an older version, even when its version string is the same (a dev build)."""
     if os.environ.get("REVIEW_DOC_NO_SERVER"):
         return None, "server disabled by REVIEW_DOC_NO_SERVER"
     home = home or paths.home_dir()
@@ -130,7 +133,12 @@ def ensure_server(home=None, wait=WAIT):
     def usable(got):
         # Same or newer: serve from it. Only an older one is replaced, so two sessions
         # on different versions (one not yet reloaded) do not stop each other in turn.
-        return got is not None and version_key(got.get("version")) >= mine
+        if got is None or version_key(got.get("version")) < mine:
+            return False
+        if need_frame:
+            port = got.get("port")
+            return isinstance(port, int) and got.get("framePort") == port + 100
+        return True
 
     info = read_info(home)
     if info:
@@ -138,7 +146,8 @@ def ensure_server(home=None, wait=WAIT):
         if usable(got):
             return info["port"], None
         if got:
-            # An older plugin's server: stop it so this version serves.
+            # An older plugin's server, or one without the frame listener an HTML
+            # page needs: stop it so this version serves.
             stop(info["port"])
     try:
         spawn(home)

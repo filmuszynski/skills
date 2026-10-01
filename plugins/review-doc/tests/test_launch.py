@@ -175,6 +175,69 @@ def test_one_server_for_concurrent_renders_and_real_rebuild():
         stop_server(h)
 
 
+def _fake_servers(home, old_frame_port):
+    """server.json names a same-version server on 4321 whose framePort is
+    old_frame_port; stop() ends it and spawn() starts a full one on 4322."""
+    state = {"stopped": [], "spawned": 0}
+    servers = {4321: {"ok": True, "version": paths.version(), "port": 4321, "pid": 11,
+                      "framePort": old_frame_port},
+               4322: {"ok": True, "version": paths.version(), "port": 4322, "pid": 22,
+                      "framePort": 4422}}
+    write(os.path.join(home, "server.json"), json.dumps({"port": 4321, "pid": 11}))
+
+    def health(port, timeout=None):
+        return None if port in state["stopped"] else servers.get(port)
+
+    def stop(port, wait=2.0):
+        state["stopped"].append(port)
+        return True
+
+    def spawn(home=None):
+        state["spawned"] += 1
+        write(os.path.join(home, "server.json"), json.dumps({"port": 4322, "pid": 22}))
+    return state, health, stop, spawn
+
+
+@test
+def test_need_frame_replaces_a_same_version_server_without_frames():
+    for old_frame in (None, 9999):
+        h = new_home()
+        state, health, stop, spawn = _fake_servers(h, old_frame)
+        with env(REVIEW_DOC_NO_SERVER=None), patch(launch, "health", health), \
+                patch(launch, "stop", stop), patch(launch, "spawn", spawn):
+            assert launch.ensure_server(h, wait=1.0) == (4321, None), "md pages keep using it"
+            assert state == {"stopped": [], "spawned": 0}
+            assert launch.ensure_server(h, wait=1.0, need_frame=True) == (4322, None)
+            assert state == {"stopped": [4321], "spawned": 1}, state
+
+
+@test
+def test_need_frame_keeps_a_server_with_its_frame_listener():
+    h = new_home()
+    state, health, stop, spawn = _fake_servers(h, 4421)
+    with env(REVIEW_DOC_NO_SERVER=None), patch(launch, "health", health), \
+            patch(launch, "stop", stop), patch(launch, "spawn", spawn):
+        assert launch.ensure_server(h, wait=1.0, need_frame=True) == (4321, None)
+    assert state == {"stopped": [], "spawned": 0}
+
+
+@test
+def test_html_kind_asks_for_a_frame_server():
+    h = use_home(new_home())
+    site = os.path.join(h, "site")
+    p = write(os.path.join(site, "index.html"), "<title>t</title>")
+    md = write(os.path.join(h, "src", "a.md"), "# A\n\n## B\n\nx\n")
+    asked = []
+
+    def ensure(home=None, wait=None, need_frame=False):
+        asked.append(need_frame)
+        return 4321, None
+    with patch(launch, "ensure_server", ensure):
+        assert run_main(["html", p])[0] == 0
+        assert run_main(["doc", md])[0] == 0
+    assert asked == [True, False], asked
+
+
 @test
 def test_an_older_server_hands_over_to_this_version():
     h = use_home(new_home())

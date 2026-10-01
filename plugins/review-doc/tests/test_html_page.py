@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 
@@ -216,7 +217,7 @@ def test_html_refusals():
     for argv, msg in ((["html", "https://example.com/"], local),
                       (["html", "http://192.168.1.5:8080/"], local),
                       (["html", "http://localhost.evil.com/"], local),
-                      (["html", "file:///" + p.replace("\\", "/").lstrip("/")], local),
+                      (["html", "file://fileserver/share/index.html"], local),
                       (["html", "http://[::1"], local),
                       (["html", "http://localhost:5173/"], later),
                       (["html", "http://[::1]:5173/x"], later)):
@@ -233,6 +234,54 @@ def test_html_refusals():
     assert code == 2 and "--out" in res["error"], res
     code, res = _main_json(["html", os.path.join(h, "missing.html")])
     assert code == 1, res
+
+
+@test
+def test_a_file_url_is_a_local_path():
+    h = use_home(new_home())
+    p = _copy_single(h)
+    uri = pathlib.Path(p).resolve().as_uri()
+    for url in (uri, "file://localhost" + uri[len("file://"):]):
+        # Taken as the path it names, so it gets as far as needing the server
+        # (the harness sets REVIEW_DOC_NO_SERVER), not a refusal.
+        code, res = _main_json(["html", url])
+        assert code == 5 and res["reason"] == "needs-server", (url, code, res)
+    missing = pathlib.Path(os.path.join(h, "site", "gone.html")).resolve().as_uri()
+    code, res = _main_json(["html", missing])
+    assert code == 1 and res["error"].startswith("no such file: "), res
+    with patch(build_screen.launch, "ensure_server", lambda *a, **k: (4321, None)):
+        code, res = _main_json(["html", uri])
+    assert code == 0, res
+    meta = pages.read_meta(res["path"])
+    assert meta["target"]["entry"] == "index.html" and meta["source"] == os.path.abspath(p).replace("\\", "/")
+
+
+@test
+def test_a_linked_entry_is_served_from_where_it_really_is():
+    h = use_home(new_home())
+    real_dir = os.path.join(h, "real")
+    os.makedirs(real_dir)
+    real = os.path.join(real_dir, "page.html")
+    shutil.copy(_fixture_path("site_single.html"), real)
+    link_dir = os.path.join(h, "elsewhere")
+    os.makedirs(link_dir)
+    link = os.path.join(link_dir, "index.html")
+    try:
+        os.symlink(real, link)
+    except (OSError, NotImplementedError) as exc:
+        # Windows without the symlink privilege: a junction to the folder is a link too.
+        try:
+            import _winapi
+            link = os.path.join(h, "junction", "page.html")
+            _winapi.CreateJunction(real_dir, os.path.dirname(link))
+        except (ImportError, OSError, AttributeError):
+            print("  (skip) cannot create a link here: %s" % exc)
+            return
+    res = build_screen.build("html", link)
+    meta = pages.read_meta(res["path"])
+    want = os.path.realpath(real).replace("\\", "/")
+    assert meta["target"] == {"type": "file", "root": os.path.dirname(want), "entry": "page.html"}, meta
+    assert meta["source"] == os.path.abspath(link).replace("\\", "/"), "the path the user gave"
 
 
 @test
