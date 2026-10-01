@@ -2626,12 +2626,30 @@
 
      No toggling off. These act now, and a button that undoes itself on a second
      press would copy an answer without the verdict you just chose. */
+  /* The draft number in At a glance counts review rounds on the server's side
+     (1.1.5), so every browser shows the same one. Fire and forget: a lost signal
+     costs one draft number, never a review. A file:// page has no server. */
+  function postDraft(action) {
+    if (!onServer()) return;
+    var body = { slug: D.meta.slug, action: action };
+    if (action === "request") body.sourceMtime = D.meta.sourceMtime;
+    fetch("/api/draft", {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).catch(function () {});
+  }
+
   function finish(kind) {
     if (kind) {
       state.data.verdict = kind;
       /* A change request copied earlier and then overruled by approving or
          declining must not carry its pending round into the next build. */
-      if (kind === "approve" || kind === "decline") state.data.pending = null;
+      if ((kind === "approve" || kind === "decline") && state.data.pending) {
+        state.data.pending = null;
+        postDraft("cancel");
+      }
       syncVerdict();
       save("verdict");
     }
@@ -2644,6 +2662,7 @@
       if (kind === "changes") {
         state.data.pending = { sentAt: Date.now(), sourceMtime: D.meta.sourceMtime };
         persist();
+        postDraft("request");
       }
       openFinish(box);
     });
@@ -3207,6 +3226,7 @@
     closeFinish();
     state.data.verdict = "";
     state.data.pending = null;
+    postDraft("cancel");
     syncVerdict();
     save("verdict");
     updatePrompt();
@@ -3650,7 +3670,7 @@
 
     docEl.addEventListener("mouseup", function (ev) {
       if (state.mode !== "comment") return;
-      if (ev.target.closest && ev.target.closest(".sec-tools, .pick-row, .credit")) return;
+      if (ev.target.closest && ev.target.closest(".sec-tools, .pick-row, .credit, .glance-fact")) return;
       setTimeout(function () {
         var sel = doc.getSelection();
         if (!sel || sel.isCollapsed) return;
@@ -3658,8 +3678,12 @@
         if (!docEl.contains(sel.anchorNode)) return;
         /* The credit line is chrome. A drag from the last paragraph into it
            would otherwise quote its text. */
-        var cr = docEl.querySelector(".credit");
-        if (cr && (cr.contains(sel.anchorNode) || cr.contains(sel.focusNode))) return;
+        /* The fact rows in At a glance are chrome too (1.1.5). */
+        var chrome = function (n) {
+          var el = n && (n.nodeType === 1 ? n : n.parentElement);
+          return !!(el && el.closest && el.closest(".credit, .glance-fact"));
+        };
+        if (chrome(sel.anchorNode) || chrome(sel.focusNode)) return;
         askForComment(sel);
       }, 10);
     });

@@ -658,6 +658,8 @@ main { min-height: 0; }
 #doc .sec.glance td > :last-child, #doc .sec[data-sec="__meta"] td > :last-child { margin-bottom: 0; }
 #doc .sec.glance th, #doc .sec.glance td,
 #doc .sec[data-sec="__meta"] th, #doc .sec[data-sec="__meta"] td { vertical-align: middle; padding-top: .36em; padding-bottom: .36em; }
+/* Draft, Created and Last edited (1.1.5): numbers that line up from page to page. */
+#doc tr.glance-fact td { font-variant-numeric: tabular-nums; }
 .sec-tools { margin-left: auto; display: flex; gap: calc(15px * var(--zoom, 1) * .37); align-items: center; }
 
 /* The controls stay quiet until the section is hovered or a decision is on

@@ -311,5 +311,6 @@ def test_choice_screens_get_no_facts():
     h = use_home(new_home())
     src = fixture_path_for_choice(h)
     html = io.open(build_screen.build("screen", src, out_dir=os.path.join(h, "out"))["path"], encoding="utf-8").read()
-    assert "glance-fact" not in html
+    # The shell's own JS and CSS name the class, so look for the row markup.
+    assert '<tr class="glance-fact"' not in html
     assert not os.path.isdir(os.path.join(h, "drafts"))

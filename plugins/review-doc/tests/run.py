@@ -1891,6 +1891,46 @@ def test_request_changes_lines_say_the_page_reloads():
     assert "Render once, after the last edit; the open page reloads when it sees that new build." in skill
 
 
+@test
+def test_post_draft_sends_slug_action_and_mtime():
+    pre = ("var sent = []; var D = {meta: {slug: 'spec-1', sourceMtime: 1000}};"
+           "function onServer() { return true; }"
+           "function fetch(url, opts) { sent.push([url, opts.method, JSON.parse(opts.body)]);"
+           " return {catch: function () {}}; }")
+    out = run_js(["postDraft"], "(postDraft('request'), postDraft('cancel'), sent)", pre)
+    assert out == [["/api/draft", "POST", {"slug": "spec-1", "action": "request", "sourceMtime": 1000}],
+                   ["/api/draft", "POST", {"slug": "spec-1", "action": "cancel"}]], out
+
+
+@test
+def test_post_draft_is_silent_off_the_server():
+    pre = ("var sent = 0; var D = {meta: {slug: 's', sourceMtime: 1}};"
+           "function onServer() { return false; } function fetch() { sent++; }")
+    assert run_js(["postDraft"], "(postDraft('request'), sent)", pre) == 0
+
+
+@test
+def test_finish_and_cancel_send_the_draft_signal():
+    src = shell._asset("shell.js")
+    # Not fn_body_run: shell.js has an inner `function finish()` earlier in the file.
+    i = src.index("function finish(kind) {")
+    fin = src[i:src.index("\n  function ", i + 1)]
+    at = fin.index("state.data.pending = { sentAt")
+    assert 'postDraft("request")' in fin[at:at + 200], "sent where the round is armed"
+    clear = fin.index('if ((kind === "approve" || kind === "decline")')
+    assert 'postDraft("cancel")' in fin[clear:clear + 250], "approve/decline drop a pending round"
+    assert 'postDraft("cancel")' in fn_body_run(src, "onFinishCancel")
+
+
+@test
+def test_fact_rows_are_chrome_for_selection():
+    src = shell._asset("shell.js")
+    assert '.closest(".sec-tools, .pick-row, .credit, .glance-fact")' in src
+    assert 'closest(".credit, .glance-fact")' in src, "a drag that starts or ends in a fact row is ignored"
+    css = shell._asset("shell.css")
+    assert "#doc tr.glance-fact td { font-variant-numeric: tabular-nums; }" in css
+
+
 NEW_TEST_MODULES = ["test_privacy", "test_vendor", "test_settings", "test_build", "test_version", "test_write",
                     "test_server", "test_pages_route", "test_housekeeping", "test_launch", "test_opening", "test_review_fixes", "test_page", "test_opener", "test_extension", "test_hook", "test_plugin_files", "test_repo_files", "test_docs", "test_drafts"]
 
@@ -2161,6 +2201,7 @@ def test_approve_and_decline_clear_a_stale_pending():
         function copyText(t, then) { then(false); }
         function persist() {}
         function openFinish() {}
+        function postDraft() {}
         finish(%s);
         process.stdout.write(JSON.stringify(atSave));
         """ % json.dumps(kind)
