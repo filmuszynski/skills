@@ -1773,26 +1773,54 @@ def test_blank_header_table_still_gets_ids_and_rows():
 # --------------------------------------------------------------------------
 
 
-@test
-def test_settle_waits_for_two_unchanged_polls():
-    out = run_js(["settleStep"], """(function () {
+SETTLE_PRELUDE = "var QUIET_FALLBACK_POLLS = 15;"
+
+
+def _settle(polls, built=100, loaded=200):
+    """polls: [[sourceMtime, pageMtime], ...]; returns the reload flag after each."""
+    return run_js(["settleStep"], """(function () {
       var st = {last: null, quiet: 0}, seen = [];
-      [100, 100, 150, 150, 150].forEach(function (m) {
-        st = settleStep(st, m, 100); seen.push(st.reload);
+      %s.forEach(function (p) {
+        st = settleStep(st, p[0], %d, p[1], %d); seen.push(st.reload);
       });
-      return seen; })()""")
+      return seen; })()""" % (json.dumps(polls), built, loaded), SETTLE_PRELUDE)
+
+
+@test
+def test_settle_reloads_once_rebuilt_and_settled():
+    # Page rebuilt at 500, after the page loaded at 200.
+    out = _settle([[100, 90], [100, 90], [150, 90], [150, 500], [150, 500]])
     assert out == [False, False, False, True, True], out
 
 
 @test
-def test_settle_resets_when_the_file_changes_again():
-    out = run_js(["settleStep"], """(function () {
-      var st = {last: null, quiet: 0}, seen = [];
-      [150, 160, 170, 170].forEach(function (m) {
-        st = settleStep(st, m, 100); seen.push(st.reload);
-      });
-      return seen; })()""")
+def test_settle_rebuilt_resets_when_the_file_changes_again():
+    out = _settle([[150, 500], [160, 500], [170, 500], [170, 500]])
     assert out == [False, False, False, True], out
+
+
+@test
+def test_settle_without_rebuild_waits_fifteen_quiet_polls():
+    # Edited, never rendered again: the old build (90) predates the load (200).
+    out = _settle([[150, 90]] * 17)
+    assert out == [False] * 15 + [True, True], out
+    out = _settle([[150, None]] * 16)
+    assert out == [False] * 15 + [True], "a missing page file is no rebuild"
+
+
+@test
+def test_settle_fallback_count_resets_on_a_further_edit():
+    out = _settle([[150, 90]] * 10 + [[160, 90]] * 16)
+    assert out == [False] * 25 + [True], out
+
+
+@test
+def test_settle_fallback_constant_and_load_time():
+    src = shell._asset("shell.js")
+    assert "var QUIET_FALLBACK_POLLS = 15;" in src
+    assert "var loadedAt = Date.now();" in src
+    pb = js_function("poll")
+    assert "settleStep(settle, got.mtime, D.meta.sourceMtime, got.page, loadedAt)" in pb
 
 
 @test
@@ -1814,7 +1842,8 @@ def test_stale_poll_cannot_start_a_second_chain():
     import subprocess
     src = "\n".join(js_function(n) for n in ("startWaiting", "stopWaiting", "poll", "settleStep", "waitNote"))
     src += """
-    var POLL_MS = 2000, pollTimer = null, settle = null, pollGen = 0, timers = 0, pending = [];
+    var POLL_MS = 2000, QUIET_FALLBACK_POLLS = 15, loadedAt = 0;
+    var pollTimer = null, settle = null, pollGen = 0, timers = 0, pending = [];
     var D = {meta: {slug: "s", sourceMtime: 100}};
     function onServer() { return true; }
     function persist() {}
@@ -1851,6 +1880,7 @@ def test_request_changes_lines_say_the_page_reloads():
     skill = io.open(os.path.join(os.path.dirname(PRESENTER), "skills", "review-md", "SKILL.md"),
                     encoding="utf-8").read()
     assert "reloads itself" in skill
+    assert "Render once, after the last edit; the open page reloads when it sees that new build." in skill
 
 
 NEW_TEST_MODULES = ["test_privacy", "test_vendor", "test_settings", "test_build", "test_version", "test_write",

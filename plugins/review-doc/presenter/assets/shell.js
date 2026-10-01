@@ -3303,19 +3303,30 @@
   /* ------------------------------------------------- waiting for Claude */
 
   /* While the Waiting box is up, and only then, the page asks every two
-     seconds whether its source changed. Claude often writes a file in several
-     edits, so it reloads only once the newer time has held for one more poll. */
+     seconds whether its source changed. Claude applies a change request in
+     several edits, seconds apart, and renders the page once after the last
+     one. So a newer source alone is not the signal: the page waits until the
+     built page is newer than this load and the source has held for one more
+     poll. A source that changed but was never rendered again still reloads,
+     once it has been quiet for QUIET_FALLBACK_POLLS polls (30 seconds). */
   var POLL_MS = 2000;
+  var QUIET_FALLBACK_POLLS = 15;
+  var loadedAt = Date.now();
   var pollTimer = null, settle = null, pollGen = 0;
 
   /* Every start and stop moves pollGen on. A fetch that was already in flight
      when the box closed or reopened carries the old number and so cannot touch
      the new session or arm a second timeout chain. */
 
-  function settleStep(st, mtime, built) {
+  /* Pure: st is the previous step, mtime the source time now, built the source
+     time this page was built from, page the built page file's time (null when
+     it is missing) and loaded when this page was loaded. */
+  function settleStep(st, mtime, built, page, loaded) {
     if (!(mtime > built)) return { last: mtime, quiet: 0, reload: false };
     var quiet = mtime === st.last ? st.quiet + 1 : 0;
-    return { last: mtime, quiet: quiet, reload: quiet >= 1 };
+    var rebuilt = typeof page === "number" && page > loaded;
+    return { last: mtime, quiet: quiet,
+             reload: (rebuilt && quiet >= 1) || quiet >= QUIET_FALLBACK_POLLS };
   }
 
   function waitNote(extra) {
@@ -3353,7 +3364,7 @@
           waitNote("The page could not be reached. Reload it once Claude is done.");
           return;
         }
-        settle = settleStep(settle, got.mtime, D.meta.sourceMtime);
+        settle = settleStep(settle, got.mtime, D.meta.sourceMtime, got.page, loadedAt);
         if (settle.reload) { stopWaiting(); persist(); location.reload(); return; }
         pollTimer = setTimeout(function () { poll(gen); }, POLL_MS);
       })

@@ -406,7 +406,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         src = source_of(pages.read_meta(path)) if path and os.path.isfile(path) else None
         if not src:
             return self._json(404, {"ok": False})
-        return self._json(200, {"mtime": int(os.path.getmtime(src) * 1000)})
+        # "page" lets a waiting page tell a re-render from Claude's first edit.
+        try:
+            built = int(os.path.getmtime(path) * 1000)
+        except OSError:
+            built = None
+        return self._json(200, {"mtime": int(os.path.getmtime(src) * 1000), "page": built})
 
     def do_POST(self):
         u = self._begin()

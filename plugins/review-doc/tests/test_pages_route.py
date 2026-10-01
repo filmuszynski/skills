@@ -156,7 +156,23 @@ def test_review_source_reports_mtime():
     with serving(h) as srv:
         status, _, data = request(srv, "GET", "/api/review-source?slug=" + res["slug"])
         assert status == 200
-        assert json.loads(data.decode("utf-8")) == {"mtime": int(os.path.getmtime(s) * 1000)}
+        assert json.loads(data.decode("utf-8"))["mtime"] == int(os.path.getmtime(s) * 1000)
+
+
+@test
+def test_review_source_reports_the_page_build_time():
+    """The waiting page reloads after Claude renders again, not after the first edit,
+    so it needs the built page's time next to the source's."""
+    h = use_home(new_home())
+    s, res = rendered(h)
+    page_file = os.path.join(h, "pages", res["slug"] + ".html")
+    with serving(h) as srv:
+        status, _, data = request(srv, "GET", "/api/review-source?slug=" + res["slug"])
+        assert status == 200
+        got = json.loads(data.decode("utf-8"))
+        assert set(got) == {"mtime", "page"}, got
+        assert got["mtime"] == int(os.path.getmtime(s) * 1000)
+        assert got["page"] == int(os.path.getmtime(page_file) * 1000)
 
 
 @test
