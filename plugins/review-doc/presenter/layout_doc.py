@@ -240,7 +240,7 @@ def _glance_html(intro, lines, used):
             ' aria-label="Add a note on the introduction">&#9998;</button>'
             '<button class="dec" type="button" data-for="%s" data-decision=""'
             ' aria-label="the introduction: undecided, click to approve">?</button>'
-            '</span></div><h2>At a glance</h2>%s<table class="glance-table">%s</table></div>'
+            '</span></div><h2>At a glance</h2>%s<table>%s</table></div>'
             % (_esc(sid), _esc(sid), _esc(sid), lead_html, rows))
 
 

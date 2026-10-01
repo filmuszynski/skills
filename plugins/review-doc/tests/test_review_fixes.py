@@ -300,7 +300,6 @@ def test_plan_without_header_text_renders_no_notes():
     assert "glance-notes" not in html and "<td>g.</td>" in html
 
 
-
 @test
 def test_document_fields_get_the_glance_box_on_the_lead():
     md = ("# Spec\n\nIntro line.\n\n**Date:** 01.10.2026\n**Status:** draft\n"
@@ -333,5 +332,19 @@ def test_plan_header_still_uses_the_shared_parser():
 
 @test
 def test_glance_css_covers_documents():
+    import re
     css = shell._asset("shell.css")
-    assert '.sec[data-sec="__meta"],\n.sec.glance,' in css
+    end = css.index("{", css.index(".sec.lead.glance:hover"))
+    group = css[css.rindex("}", 0, end) + 1:end]
+    assert ".sec.lead.glance," in group and ".sec.lead.glance:hover," in group
+    assert '.sec[data-sec="__meta"],' in group
+
+    def weight(sel):
+        return len(re.findall(r"\.[A-Za-z]|:hover", sel))
+
+    # `.sec.lead` rules that set a border: the box must outweigh every one.
+    rules = re.findall(r"(\.sec\.lead(?::hover)?)\s*\{[^}]*border", css)
+    assert rules, "expected the .sec.lead border rules"
+    for sel in rules:
+        glance = ".sec.lead.glance:hover" if ":hover" in sel else ".sec.lead.glance"
+        assert weight(glance) > weight(sel), "%s ties or beats the glance border" % sel

@@ -573,9 +573,13 @@ main { min-height: 0; }
    box-sizing is border-box everywhere, so the second pixel costs padding rather
    than moving the block. */
 .sec[data-sec="__meta"],
-.sec.glance,
-.sec.glance:hover,
+.sec.lead.glance,
+.sec.lead.glance:hover,
 .sec[data-sec="__meta"]:hover { border: 2px solid var(--accent); }
+/* A document's box also carries `lead`, whose border-color and margin sit later
+   in the file at (0,2,0). The extra class here outweighs them, so the order of
+   the two never matters. The plan box has no background and a 1.1em gap. */
+.sec.lead.glance { background: none; margin-bottom: 1.1em; }
 
 /* Text written before the first header field leads, above the table. A field's
    own quote, list or code block sits in its cell, tight to the cell's edges. */
