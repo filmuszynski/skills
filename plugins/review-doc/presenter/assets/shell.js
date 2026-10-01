@@ -49,13 +49,16 @@
   function emptyData() {
     return {
       meta: { slug: D.meta.slug, kind: D.meta.kind, source: D.meta.source, generatedAt: D.meta.generatedAt },
-      steps: {}, marks: {}, edits: {}, tables: {}, choices: {}, general: "", verdict: ""
+      steps: {}, marks: {}, edits: {}, tables: {}, choices: {}, general: "", verdict: "", rounds: [], pending: null
     };
   }
 
   /* ------------------------------------------------------------ persistence */
 
+  var forgotten = false;
+
   function persist() {
+    if (forgotten) return;
     try {
       localStorage.setItem(LSKEY, JSON.stringify({
         mode: state.mode, ui: state.ui, data: state.data, savedAt: Date.now()
@@ -158,6 +161,8 @@
         if (!state.data.choices) state.data.choices = {};
         if (typeof state.data.general !== "string") state.data.general = "";
         if (typeof state.data.verdict !== "string") state.data.verdict = "";
+        if (!Array.isArray(state.data.rounds)) state.data.rounds = [];
+        if (!state.data.pending || typeof state.data.pending !== "object") state.data.pending = null;
       }
       if (got && got.mode) state.mode = got.mode;
       if (got && got.ui) {
@@ -171,9 +176,25 @@
     } catch (e) { /* corrupt payload: start clean rather than fail to open */ }
   }
 
+  /* A change request becomes an earlier round when the page comes back on the
+     rebuilt source, not when it is sent: until then Cancel can still take it
+     back. A hand reload of the same build moves nothing. */
+  function promoteRound(data, builtMtime) {
+    var p = data.pending;
+    if (!p || typeof builtMtime !== "number" || !(builtMtime > p.sourceMtime)) return false;
+    data.rounds = (data.rounds || []).concat([{
+      sentAt: p.sentAt, marks: data.marks || {}, edits: data.edits || {}, tables: data.tables || {}
+    }]);
+    data.marks = {}; data.edits = {}; data.tables = {}; data.steps = {};
+    data.general = ""; data.verdict = ""; data.pending = null;
+    return true;
+  }
+
+  function hasRounds() { return !!(state.data.rounds && state.data.rounds.length); }
+
   /* ------------------------------------------------------------------ undo */
 
-  var RESET_TITLE = "Clear every comment, rewrite and decision. Ctrl+Z brings it back.";
+  var RESET_TITLE = "Clear every comment, rewrite, decision and earlier round. Ctrl+Z brings it back.";
 
   var hist = { undo: [], redo: [], lastKey: null, lastAt: 0 };
   var baseline = null;
@@ -252,14 +273,14 @@
 
   function onReset() {
     if (resetArmed()) { disarmReset(); resetAll(); return; }
-    if (!feedbackCount() && !state.data.verdict) return;
+    if (!feedbackCount() && !state.data.verdict && !hasRounds()) return;
     armReset();
   }
 
   /* Reset is a mutation like any other: it goes through save(), so it lands on
      the undo stack and Ctrl+Z brings the whole review back. */
   function resetAll() {
-    if (!feedbackCount() && !state.data.verdict) return;
+    if (!feedbackCount() && !state.data.verdict && !hasRounds()) return;
     state.data = emptyData();
     closeBubble();
     applyDataToDoc();
@@ -291,7 +312,7 @@
        untouched plan has nothing to reset even after an undo refilled the
        redo stack. */
     if (x) {
-      x.disabled = !feedbackCount() && !state.data.verdict;
+      x.disabled = !feedbackCount() && !state.data.verdict && !hasRounds();
       /* An undo can empty the review while the confirm window is still open,
          and a red exclamation mark on a dead button is a promise it cannot
          keep. */
@@ -2432,6 +2453,7 @@
   }
 
   function onFinishCancel() {
+    forgotten = false;
     closeFinish();
     state.data.verdict = "";
     state.data.pending = null;
@@ -2461,7 +2483,12 @@
     b.setAttribute("data-tip", "Close this page");
   }
 
-  function forgetPage() { /* Task 5: clears this page's record */ }
+  /* After window.close() fails the page stays open with its in-memory state,
+     and persist() would write the record straight back. */
+  function forgetPage() {
+    forgotten = true;
+    try { localStorage.removeItem(LSKEY); } catch (e) { /* blocked storage */ }
+  }
 
   /* Browsers only let a script close a window a script opened. A page opened by
      VS Code or the system browser stays, so after a moment the box says how to
@@ -2853,6 +2880,7 @@
     collectTables();
     expireOld(hoursMs(staleHours));
     load();
+    if (promoteRound(state.data, D.meta.sourceMtime)) persist();
     baseline = JSON.stringify(state.data);
     applyDataToDoc();
     setMode(state.mode);

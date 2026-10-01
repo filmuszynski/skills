@@ -938,7 +938,7 @@ def test_reset_sits_with_undo_and_redo_and_is_undoable():
     assert "confirm(" not in js, "the confirmation is the button itself, not a dialog"
     assert 'bind("reset", onReset);' in js, "the click arms first, it does not clear"
     # and it greys out on an untouched plan, following what there is to clear
-    assert "x.disabled = !feedbackCount() && !state.data.verdict;" in js
+    assert "x.disabled = !feedbackCount() && !state.data.verdict && !hasRounds();" in js
 
 
 @test
@@ -1504,6 +1504,12 @@ def js_function(name):
         i += 1
 
 
+def fn_body_run(src, name):
+    i = src.index("function " + name + "(")
+    j = src.find("\n  function ", i + 1)
+    return src[i:j if j > 0 else len(src)]
+
+
 def run_js(names, expr):
     import subprocess
     src = "\n".join(js_function(n) for n in names)
@@ -1848,6 +1854,55 @@ def test_request_changes_lines_say_the_page_reloads():
 
 NEW_TEST_MODULES = ["test_privacy", "test_vendor", "test_settings", "test_build", "test_version", "test_write",
                     "test_server", "test_pages_route", "test_housekeeping", "test_launch", "test_opening", "test_review_fixes", "test_page", "test_opener", "test_extension", "test_hook", "test_plugin_files", "test_repo_files", "test_docs"]
+
+
+@test
+def test_promote_moves_the_pending_round_on_a_newer_build():
+    out = run_js(["promoteRound"], """(function () {
+      var d = {marks: {m1: {sec: "s", quote: "q", comment: "c"}}, edits: {e1: {sec: "s", alt: "a", neu: "b"}},
+               tables: {}, steps: {x: {decision: "skip"}}, general: "g", verdict: "changes",
+               rounds: [], pending: {sentAt: 5, sourceMtime: 100}};
+      var moved = promoteRound(d, 200);
+      return [moved, d.rounds.length, Object.keys(d.rounds[0].marks), Object.keys(d.marks).length,
+              Object.keys(d.edits).length, d.general, d.verdict, d.pending, Object.keys(d.steps).length,
+              d.rounds[0].sentAt]; })()""")
+    assert out == [True, 1, ["m1"], 0, 0, "", "", None, 0, 5], out
+
+
+@test
+def test_promote_does_nothing_on_the_same_build_or_without_pending():
+    out = run_js(["promoteRound"], """(function () {
+      var a = {marks: {m: {}}, edits: {}, tables: {}, steps: {}, general: "", verdict: "",
+               rounds: [], pending: {sentAt: 1, sourceMtime: 100}};
+      var b = {marks: {m: {}}, edits: {}, tables: {}, steps: {}, general: "", verdict: "",
+               rounds: [], pending: null};
+      return [promoteRound(a, 100), a.pending !== null, promoteRound(b, 999), b.rounds.length]; })()""")
+    assert out == [False, True, False, 0], out
+
+
+@test
+def test_rounds_survive_load_and_clear_on_reset_and_close():
+    src = shell._asset("shell.js")
+    assert "rounds: [], pending: null" in fn_body_run(src, "emptyData")
+    ld = fn_body_run(src, "load")
+    assert "Array.isArray(state.data.rounds)" in ld and "state.data.pending" in ld
+    st = fn_body_run(src, "start")
+    assert st.index("promoteRound(state.data, D.meta.sourceMtime)") < st.index("baseline = JSON.stringify(state.data);"), \
+        "baseline after promotion, so Ctrl+Z cannot bring the moved round back"
+    assert "hasRounds()" in fn_body_run(src, "onReset") and "hasRounds()" in fn_body_run(src, "syncHistButtons")
+    assert "localStorage.removeItem(LSKEY)" in fn_body_run(src, "forgetPage")
+    assert "rounds" not in src[src.index("function buildPrompt("):src.index("function feedbackCount(")], \
+        "earlier rounds never go back into the prompt"
+
+
+@test
+def test_forgotten_page_is_not_written_back():
+    src = shell._asset("shell.js")
+    assert "var forgotten = false;" in src
+    assert fn_body_run(src, "persist").split("\n")[1].strip() == "if (forgotten) return;"
+    assert "forgotten = true;" in fn_body_run(src, "forgetPage")
+    assert fn_body_run(src, "onFinishCancel").split("\n")[1].strip() == "forgotten = false;"
+    assert src.count("function forgetPage(") == 1
 
 
 def main():

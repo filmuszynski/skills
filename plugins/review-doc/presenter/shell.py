@@ -75,7 +75,7 @@ __CSS__
     <button class="iconbtn" id="undo" type="button" data-tip="Undo (Ctrl+Z)" aria-label="Undo">&#8630;</button>
     <button class="iconbtn" id="redo" type="button" data-tip="Redo (Ctrl+Y)" aria-label="Redo">&#8631;</button>
     <button class="iconbtn" id="reset" type="button"
-            data-tip="Clear every comment, rewrite and decision. Ctrl+Z brings it back."
+            data-tip="Clear every comment, rewrite, decision and earlier round. Ctrl+Z brings it back."
             aria-label="Reset the review"><span class="ico-reset" aria-hidden="true"></span></button>
   </div>
   </div></div>
