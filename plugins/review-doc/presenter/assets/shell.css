@@ -171,9 +171,11 @@ header > .doc-title { flex-shrink: 1; }
 .counters { display: flex; gap: 5px; }
 /* The scope toggle: three icons in one box, only the current one opaque, so a
    click cross-fades instead of swapping. It fades in the first time a page has
-   an earlier round. */
+   an earlier round, growing from no width and taking back the row gap behind
+   it as it goes, so the counters slide over instead of jumping. */
+.controls { --ctl-gap: 14px; }
 #cycle-scope { position: relative; width: 30px; padding: 0; display: inline-grid; place-items: center; }
-#cycle-scope.is-new { animation: scope-in .2s ease; }
+#cycle-scope.is-new { animation: scope-in .2s ease; overflow: hidden; }
 #cycle-scope[hidden] { display: none; }
 #cycle-scope .ico { grid-area: 1 / 1; width: 14px; height: 14px; fill: none; stroke: currentColor;
                     stroke-width: 1.5; opacity: 0; transition: opacity .18s ease; }
@@ -181,7 +183,10 @@ header > .doc-title { flex-shrink: 1; }
 #cycle-scope[data-scope="previous"] .sc-previous,
 #cycle-scope[data-scope="all"] .sc-all { opacity: 1; }
 #cycle-scope .sc-current circle { fill: currentColor; }
-@keyframes scope-in { from { opacity: 0; transform: scale(.85); } to { opacity: 1; transform: none; } }
+@keyframes scope-in {
+  from { opacity: 0; width: 0; margin-right: calc(-1 * var(--ctl-gap, 14px)); }
+  to { opacity: 1; width: 30px; margin-right: 0; }
+}
 @media (prefers-reduced-motion: reduce) {
   #cycle-scope.is-new { animation: none; }
   #cycle-scope .ico { transition: none; }
@@ -1342,7 +1347,7 @@ body.prompt-hidden .verdict-row { margin-top: 0; }
 
 @media (max-width: 720px) {
   header { gap: 8px; padding-left: 12px; padding-right: 12px; }
-  .controls { gap: 8px; }
+  .controls { gap: 8px; --ctl-gap: 8px; }
   header.title-peek .controls-slot { margin-left: -8px; }
   header .eyebrow { display: none; }
   footer { padding-left: 12px; padding-right: 12px; }

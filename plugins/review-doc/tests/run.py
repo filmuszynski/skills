@@ -2054,6 +2054,21 @@ def test_scope_button_markup_and_behaviour():
 
 
 @test
+def test_scope_button_slides_in_from_nothing():
+    c = shell._asset("shell.css")
+    assert "#cycle-scope.is-new { animation: scope-in" in c
+    kf = c[c.index("@keyframes scope-in"):]
+    kf = kf[:kf.index("\n}\n") + 3]
+    frm = kf[kf.index("from"):kf.index(" to ")]
+    assert "opacity: 0" in frm and "width: 0" in frm, kf
+    assert "margin-right: calc(-1 * var(--ctl-gap, 14px))" in frm, "the gap closes too, so the counters slide"
+    assert "--ctl-gap: 8px" in c, "the narrow header has the smaller gap"
+    rm = c[c.index("#cycle-scope.is-new { animation: scope-in"):]
+    rm = rm[rm.index("@media (prefers-reduced-motion: reduce)"):]
+    assert "#cycle-scope.is-new { animation: none; }" in rm[:200]
+
+
+@test
 def test_reset_puts_the_scope_back_on_this_round():
     src = shell._asset("shell.js")
     ra = fn_body_run(src, "resetAll")
