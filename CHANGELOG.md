@@ -6,6 +6,15 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-01
+
+### Changed
+- Every button in the header from the Comment / Edit text switch to the right is now
+  as tall as the feedback counters, so the row reads as one line of buttons.
+- The Comment / Edit text switch slides its highlight from one half to the other
+  instead of jumping. Both halves are the same width, the labels sit 1px higher, and
+  the slide is off under reduced motion.
+
 ## [1.0.2] - 2026-10-01
 
 ### Fixed

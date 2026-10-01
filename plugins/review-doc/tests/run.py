@@ -1718,6 +1718,26 @@ def test_request_changes_loop_sits_higher_with_more_air():
     assert "margin-right" not in reset, "the header reset loop is not moved"
 
 
+@test
+def test_header_buttons_one_height_and_mode_plate_slides():
+    """Filip, 01.10.2026 (1.0.3): every button from the mode switch rightwards is as
+    tall as the counters, and the switch slides its accent instead of jumping."""
+    css = io.open(os.path.join(PRESENTER, "assets", "shell.css"), encoding="utf-8").read()
+    assert ".counter, .modes, header .iconbtn { height: 26px; }" in css
+    modes = css.split(chr(10) + ".modes {")[1].split("}")[0]
+    assert "grid-template-columns: 1fr 1fr;" in modes, "two equal halves for the plate"
+    plate = css.split(chr(10) + ".modes::before {")[1].split("}")[0]
+    assert "transition: transform" in plate
+    assert "body.mode-edit .modes::before { transform: translateX(100%); }" in css
+    assert "padding: 0 12px 2px;" in css.split(chr(10) + ".modes button {")[1].split("}")[0], \
+        "the label sits 1px higher"
+    assert '.modes button[aria-pressed="true"] { color: #2a1608; font-weight: 600; }' in css, \
+        "the pressed half no longer paints its own background"
+    html = io.open(os.path.join(PRESENTER, "shell.py"), encoding="utf-8").read()
+    assert 'data-mode="comment" data-label="Comment"' in html
+    assert 'data-mode="edit" data-label="Edit text"' in html
+
+
 # --------------------------------------------------------------------------
 
 

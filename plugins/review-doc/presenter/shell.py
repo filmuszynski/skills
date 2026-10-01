@@ -66,9 +66,9 @@ __CSS__
     <button class="counter" data-kind="all" type="button" disabled><svg class="ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.6 14.2V2.4"/><path d="M3.6 2.9h8.6l-2 2.9 2 2.9H3.6"/></svg><span class="num">0</span></button>
   </div>
   <div class="modes" role="group" aria-label="Review mode">
-    <button type="button" data-mode="comment" aria-pressed="true"
+    <button type="button" data-mode="comment" data-label="Comment" aria-pressed="true"
             data-tip="Select any passage to comment on it">Comment</button>
-    <button type="button" data-mode="edit" aria-pressed="false"
+    <button type="button" data-mode="edit" data-label="Edit text" aria-pressed="false"
             data-tip="Click into the text and rewrite it in place">Edit text</button>
   </div>
   <div class="history">

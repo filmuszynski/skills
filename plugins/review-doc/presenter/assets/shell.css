@@ -239,19 +239,68 @@ header > .doc-title { flex-shrink: 1; }
   .is-target { animation: none; outline: 2px solid var(--accent); outline-offset: 3px; }
 }
 
-.modes { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+/* Every control from the mode switch rightwards stands as tall as the
+   counters, so the row reads as one line of buttons. The counters are pinned
+   too: left to their content they land a fraction short at browser zoom. */
+.counter, .modes, header .iconbtn { height: 26px; }
+header .iconbtn { padding-top: 0; padding-bottom: 0; }
+
+/* The two halves are one width, so the accent can be a single plate that
+   slides between them instead of jumping. The plate sits under the labels;
+   the bold weight moves with it but the text never shifts, because each
+   label is laid out once at its pressed weight. */
+.modes {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.modes::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 50%;
+  background: var(--accent);
+  transition: transform .22s ease;
+}
+body.mode-edit .modes::before { transform: translateX(100%); }
 
 .modes button {
+  position: relative;
   border: 0;
   background: transparent;
   font: inherit;
   font-size: 13px;
-  padding: 4px 12px;
+  line-height: 1;
+  /* 2px under the label lifts its centre by 1px, where it sits level with the
+     counters' numbers. */
+  padding: 0 12px 2px;
   cursor: pointer;
   color: var(--label);
+  transition: color .22s ease;
 }
 
-.modes button[aria-pressed="true"] { background: var(--accent); color: #2a1608; font-weight: 600; }
+/* The label is drawn once in bold and invisible, which fixes its width, and
+   the visible one sits on top of it in whichever weight it has right now. */
+.modes button::after {
+  content: attr(data-label);
+  display: block;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  font-weight: 600;
+}
+
+.modes button[aria-pressed="true"] { color: #2a1608; font-weight: 600; }
+
+@media (prefers-reduced-motion: reduce) {
+  .modes::before, .modes button { transition: none; }
+}
 
 .iconbtn {
   border: 1px solid var(--line);
