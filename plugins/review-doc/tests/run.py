@@ -1763,6 +1763,12 @@ def test_header_with_one_named_cell_is_kept():
 
 
 @test
+def test_header_with_only_an_image_is_kept():
+    html = layout_plan._md("| ![logo](a.png) | |\n|---|---|\n| a | b |\n")
+    assert "<img" in html and "<thead>" in html and 'class="blank"' not in html, html
+
+
+@test
 def test_blank_header_table_still_gets_ids_and_rows():
     md = "| | |\n|---|---|\n| a | b |\n| c | d |\n"
     html = layout_tables.stamp_tables(layout_plan._md(md), md, "s1", set())
