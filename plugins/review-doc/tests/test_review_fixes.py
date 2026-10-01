@@ -11,6 +11,8 @@ from serverkit import serving, review_server
 
 import build_screen
 import launch
+import layout_doc
+import layout_plan
 import settings
 import shell
 
@@ -298,3 +300,38 @@ def test_plan_without_header_text_renders_no_notes():
     assert "glance-notes" not in html and "<td>g.</td>" in html
 
 
+
+@test
+def test_document_fields_get_the_glance_box_on_the_lead():
+    md = ("# Spec\n\nIntro line.\n\n**Date:** 01.10.2026\n**Status:** draft\n"
+          "> quoted under status\n\n## One\n\nText.\n")
+    built = layout_doc.build(md, source="/x/spec.md")
+    html = built["body_html"]
+    lead_id = built["sections"][0]["id"]
+    assert built["sections"][0]["kind"] == "intro"
+    assert 'class="sec lead glance" data-sec="%s"' % lead_id in html
+    box = html[html.index("glance"):html.index("</table>")]
+    assert "<h2>At a glance</h2>" in box and "Intro line." in box
+    assert "<th>Date</th>" in box and "01.10.2026" in box
+    assert box.index("draft") < box.index("quoted under status"), "the quote stays in its field"
+    assert "data-edit-id" in box, "field values are rewritable"
+
+
+@test
+def test_document_without_fields_renders_as_before():
+    md = "# Doc\n\nJust a lead.\n\n## A\n\nText.\n"
+    html = layout_doc.build(md, source="/x/d.md")["body_html"]
+    assert "glance" not in html and "Just a lead." in html
+
+
+@test
+def test_plan_header_still_uses_the_shared_parser():
+    p = layout_plan.parse("# P\n\n**Goal:** g\n- a\n- b\n\n## S\n\nx\n")
+    assert p["meta"]["Goal"].startswith("g") and "- a" in p["meta"]["Goal"]
+    assert hasattr(layout_plan, "header_blocks")
+
+
+@test
+def test_glance_css_covers_documents():
+    css = shell._asset("shell.css")
+    assert '.sec[data-sec="__meta"],\n.sec.glance,' in css

@@ -114,6 +114,51 @@ def _fence_marks(lines):
         literal.add(start)
 
 
+def header_blocks(lines, fenced):
+    """Header lines to (preamble, {field: lines}).
+
+    Every line belongs to the field above it, in the order written, until the
+    next **Field:** line; before the first field it belongs to the preamble.
+    Nothing is guessed, so a quote, a list or a code block stays with the line
+    that introduces it, and nothing can go missing (1.0.2). Shared by plans and
+    documents.
+    """
+    preamble, meta, last, in_banner = [], {}, None, False
+
+    def put(line, code):
+        block = preamble if last is None else meta[last]
+        # A --- or === straight under text would make that text a heading
+        # (a setext underline). In the header it is a rule, so it gets its own line.
+        if not code and RE_SETEXT.match(line) and block and block[-1].strip():
+            block.append("")
+        block.append(line)
+
+    for line, code in zip(lines, fenced):
+        if code:
+            put(line, True)
+            in_banner = False
+            continue
+        mm = RE_META.match(line)
+        if mm:
+            last, in_banner = mm.group(1).strip(), False
+            # A repeated field name keeps both texts rather than the last.
+            block = meta.setdefault(last, [])
+            if block:
+                block.append("")
+            block.append(mm.group(2))
+            continue
+        # The writing-plans banner speaks to the executing agent; it is not
+        # part of what is reviewed.
+        if line.startswith(AGENTIC_BANNER):
+            in_banner = True
+        if in_banner:
+            if line.startswith(">"):
+                continue
+            in_banner = False
+        put(line, False)
+    return preamble, meta
+
+
 def parse(raw):
     """Markdown text to {title, meta, sections, preamble}."""
     text = _strip_front_matter(_strip_bom(raw)).replace("\r\n", "\n")
@@ -133,8 +178,8 @@ def parse(raw):
         if RE_TASK.match(line) or RE_H2.match(line):
             break
 
-    title, meta, last_meta = "", {}, None
-    preamble, in_banner = [], False
+    title = ""
+    header = []             # (line, is_code) pairs seen while the header is open
     header_open = not has_title
     sections, current = [], None
     plain_count = 0
@@ -152,25 +197,12 @@ def parse(raw):
         del current["lines"]
         sections.append(current)
 
-    # Before the first section every line belongs to the field above it, in the
-    # order written, until the next **Field:** line; before the first field it
-    # belongs to the preamble. Nothing is guessed, so a quote, a list or a code
-    # block stays with the line that introduces it, and nothing can go missing.
-    def header_line(line, code=False):
-        block = preamble if last_meta is None else meta[last_meta]
-        # A --- or === straight under text would make that text a heading
-        # (a setext underline). In the header it is a rule, so it gets its own line.
-        if not code and RE_SETEXT.match(line) and block and block[-1].strip():
-            block.append("")
-        block.append(line)
-
     for line, code in zip(lines, fenced):
         if code:
             if current is not None:
                 current["lines"].append(line)
             elif header_open:
-                header_line(line, code=True)
-                in_banner = False
+                header.append((line, True))
             continue
 
         if has_title and not title and line.startswith("# "):
@@ -205,26 +237,11 @@ def parse(raw):
 
         if not header_open:
             continue        # a marker comment above the title is not header text
-        mm = RE_META.match(line)
-        if mm:
-            last_meta, in_banner = mm.group(1).strip(), False
-            # A repeated field name keeps both texts rather than the last.
-            block = meta.setdefault(last_meta, [])
-            if block:
-                block.append("")
-            block.append(mm.group(2))
-            continue
-        # The writing-plans banner speaks to the executing agent; it is not
-        # part of what is reviewed.
-        if line.startswith(AGENTIC_BANNER):
-            in_banner = True
-        if in_banner:
-            if line.startswith(">"):
-                continue
-            in_banner = False
-        header_line(line)
+        header.append((line, False))
 
     close()
+
+    preamble, meta = header_blocks([l for l, _ in header], [c for _, c in header])
 
     seen = {}
     for sec in sections:

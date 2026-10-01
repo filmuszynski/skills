@@ -16,11 +16,12 @@ What a document gets that `layout_plan` would not give it:
     reads `### Task N:`.
   * a file with no headings at all still renders, as one section. That case
     produced a blank page.
-  * no `**Key:** value` table. `layout_plan._meta_html` hangs its table off
-    `data-sec="__meta"`, which never appears in the `sections` list, and
-    `buildPrompt` only prints marks whose section it finds there. A comment on
-    that table is stored and silently never sent. A lead block with a real id
-    has no such hole, so the meta lines become part of the lead instead.
+  * `**Key:** value` fields in the lead get the plan's At a glance box (1.1),
+    but on the lead block's real id. `layout_plan._meta_html` hangs its table
+    off `data-sec="__meta"`, which never appears in the `sections` list, and
+    `buildPrompt` only prints marks whose section it finds there, so a comment
+    on that box is stored and silently never sent. The lead's id has no such
+    hole.
 
 Sections are flat. A subsection is a sibling that indents, not a child, which is
 what lets every mechanism in the shell work on it unchanged.
@@ -31,8 +32,9 @@ import os
 import re
 
 import shell
-from layout_plan import (RE_FENCE, RE_H2, _esc, _hash, _md, _render_block,
-                         _strip_bom, _strip_front_matter)
+from layout_plan import (RE_FENCE, RE_H2, _esc, _fence_marks, _hash, _md,
+                         _render_block, _strip_bom, _strip_front_matter,
+                         _trim_block, header_blocks)
 
 RE_H3 = re.compile(r"^###\s+(.+?)\s*$")
 
@@ -140,7 +142,8 @@ def parse(raw):
         else:
             seen[sec["id"]] = 0
 
-    return {"title": title or "Document", "preamble": lead, "sections": sections}
+    return {"title": title or "Document", "preamble": lead,
+            "preamble_lines": preamble, "sections": sections}
 
 
 # ------------------------------------------------------------------- render
@@ -214,6 +217,33 @@ def slug_for_path(source):
     return base or "document"
 
 
+def _glance_html(intro, lines, used):
+    """The plan's At a glance box, on the lead block's real id, so a comment on
+    it reaches the prompt (the plan box's __meta id never did). None when the
+    lead has no **Key:** line."""
+    lines = [l.rstrip("\n") for l in lines]
+    fenced = _fence_marks(lines)
+    notes, meta = header_blocks(lines, fenced)
+    if not meta:
+        return None
+    sid = intro["id"]
+    rows = "".join(
+        "<tr><th>%s</th><td>%s</td></tr>"
+        % (_esc(k), _render_block(_trim_block(v), sid, used))
+        for k, v in meta.items())
+    lead = _trim_block(notes)
+    lead_html = ('<div class="glance-notes">%s</div>' % _render_block(lead, sid, used)
+                 if lead.strip() else "")
+    return ('<div class="sec lead glance" data-sec="%s" data-kind="intro">'
+            '<div class="sec-tag"><span class="sec-tools">'
+            '<button class="note-btn" type="button" data-for="%s" data-has-note="no"'
+            ' aria-label="Add a note on the introduction">&#9998;</button>'
+            '<button class="dec" type="button" data-for="%s" data-decision=""'
+            ' aria-label="the introduction: undecided, click to approve">?</button>'
+            '</span></div><h2>At a glance</h2>%s<table class="glance-table">%s</table></div>'
+            % (_esc(sid), _esc(sid), _esc(sid), lead_html, rows))
+
+
 def build(raw, source, slug=None, generated_at=""):
     """Document Markdown to the keyword arguments shell.render takes."""
     doc = parse(raw)
@@ -228,7 +258,8 @@ def build(raw, source, slug=None, generated_at=""):
                  "intro": doc["preamble"], "steps": []}
         rows.append({"id": intro["id"], "num": "Intro", "name": "",
                      "kind": "intro", "steps": []})
-        body.append(_section_html(intro, used))
+        glance = _glance_html(intro, doc["preamble_lines"], used)
+        body.append(glance or _section_html(intro, used))
 
     for sec in doc["sections"]:
         body.append(_section_html(sec, used))

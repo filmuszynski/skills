@@ -573,6 +573,8 @@ main { min-height: 0; }
    box-sizing is border-box everywhere, so the second pixel costs padding rather
    than moving the block. */
 .sec[data-sec="__meta"],
+.sec.glance,
+.sec.glance:hover,
 .sec[data-sec="__meta"]:hover { border: 2px solid var(--accent); }
 
 /* Text written before the first header field leads, above the table. A field's
@@ -581,6 +583,10 @@ main { min-height: 0; }
 .sec[data-sec="__meta"] .glance-notes > :first-child { margin-top: 0; }
 .sec[data-sec="__meta"] td > :first-child { margin-top: 0; }
 .sec[data-sec="__meta"] td > :last-child { margin-bottom: 0; }
+.sec.glance .glance-notes { margin-bottom: .9em; }
+.sec.glance .glance-notes > :first-child { margin-top: 0; }
+.sec.glance td > :first-child { margin-top: 0; }
+.sec.glance td > :last-child { margin-bottom: 0; }
 .sec-tools { margin-left: auto; display: flex; gap: calc(15px * var(--zoom, 1) * .37); align-items: center; }
 
 /* The controls stay quiet until the section is hovered or a decision is on
@@ -605,6 +611,7 @@ main { min-height: 0; }
    is what lets these outweigh the #doc h2/h3 rules below. */
 #doc .plain .sec > h2[data-sec],
 #doc .plain .sec > h3[data-sec],
+#doc .plain .sec.glance > h2,
 #doc .plain .sec[data-sec="__meta"] > h2 {
   font-size: .73em;
   line-height: 1.6;
