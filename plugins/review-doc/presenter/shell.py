@@ -107,6 +107,21 @@ __ACTIONS__
     </div>
   </div>
 </footer>
+<div id="finish" class="finish" hidden>
+  <div class="finish-backdrop"></div>
+  <div class="finish-box" role="dialog" aria-modal="true" aria-labelledby="finish-title"
+       aria-describedby="finish-text">
+    <h2 id="finish-title"><span class="finish-dot" aria-hidden="true"></span><span class="finish-title-text"></span></h2>
+    <p id="finish-text"></p>
+    <div class="finish-actions">
+      <button type="button" class="btn" id="finish-cancel" data-tip="Go back to edit">Cancel</button>
+      <button type="button" class="btn primary" id="finish-close" data-tip="Close this page"
+              data-label="Confirm"><span class="lbl">Close page</span></button>
+    </div>
+    <button type="button" class="finish-recopy" id="finish-recopy"
+            data-tip="Copy the same prompt to the clipboard again">Copy prompt again</button>
+  </div>
+</div>
 <script>
 /* Assigned onto window on purpose. A top-level `const` in a classic script
    lives in the global lexical environment and never becomes a window

@@ -1339,6 +1339,66 @@ body.prompt-hidden .verdict-row { margin-top: 0; }
 #doc [data-new-cell] { background: rgba(240, 132, 78, .12); min-width: 3em; }
 #doc table[data-killed] { opacity: .4; text-decoration: line-through; }
 
+/* ---- finish overlay ---------------------------------------------------- */
+
+.finish { position: fixed; inset: 0; z-index: 9000; display: grid; place-items: center; }
+.finish[hidden] { display: none; }
+.finish-backdrop {
+  position: absolute; inset: 0;
+  background: rgba(42, 38, 34, .4);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+.finish-box {
+  position: relative;
+  width: min(420px, calc(100vw - 32px));
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 20px 22px 18px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity .22s ease, transform .22s ease;
+}
+.finish.is-open .finish-backdrop { opacity: 1; }
+.finish.is-open .finish-box { opacity: 1; transform: none; }
+.finish-box h2 { margin: 0 0 8px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+.finish-box p { margin: 0 0 18px; color: var(--ink); line-height: 1.5; }
+.finish-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.finish-recopy {
+  display: block;
+  margin: 12px 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--label);
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color .18s ease;
+}
+.finish-recopy:hover { color: var(--link); }
+.finish-recopy.is-done { color: var(--ok); text-decoration: none; }
+.finish-dot { display: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.finish.is-wait .finish-dot { display: inline-block; animation: finish-pulse 1.6s ease-in-out infinite; }
+@keyframes finish-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+#finish-close { display: inline-grid; transition: background-color .18s ease, border-color .18s ease, color .18s ease; }
+/* The longer label is laid out invisibly, so arming does not resize the button. */
+#finish-close::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; }
+#finish-close .lbl, #finish-close::after { grid-area: 1 / 1; }
+#finish-close.armed, #finish-close.armed:hover { background: var(--skip); border-color: var(--skip); color: #fff; }
+@media (prefers-reduced-motion: reduce) {
+  .finish-backdrop, .finish-box, #finish-close, .finish-recopy { transition: none; }
+  .finish-box { transform: none; }
+  .finish.is-wait .finish-dot { animation: none; }
+}
+
 @media print {
   header, footer, .orphans, .stale, .tbl-bar, .credit-tail { display: none; }
   body { display: block; overflow: visible; }

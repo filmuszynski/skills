@@ -42,7 +42,8 @@ def css():
 
 def fn_body(src, name):
     """The text of one top-level function in shell.js, up to the next one."""
-    i = src.index("function " + name + "(")
+    i = src.find("\n  function " + name + "(")
+    i = i + 1 if i >= 0 else src.index("function " + name + "(")
     j = src.find("\n  function ", i + 1)
     return src[i:j if j > 0 else len(src)]
 
@@ -232,3 +233,59 @@ def test_pill_colours_and_peek():
     # 1.0.2: the pill stays while a cut title is shown whole; only the controls go.
     assert "header.title-peek .eyebrow" not in c, "nothing hides the pill on peek"
     assert "transition" not in base, "the pill no longer animates"
+
+
+@test
+def test_finish_overlay_markup_and_copy():
+    html = page()
+    assert 'id="finish"' in html and 'role="dialog"' in html and 'aria-modal="true"' in html
+    assert 'id="finish-close"' in html and 'data-tip="Close this page"' in html
+    assert 'id="finish-cancel"' in html and 'data-tip="Go back to edit"' in html
+    src = js()
+    for s in ("Your approve prompt has been copied. Paste it back to Claude and close this page.",
+              "Your decline prompt has been copied. Paste it back to Claude and close this page.",
+              "Your change request has been copied. Paste it back to Claude and wait for this page to reload.",
+              "Your browser keeps this tab open. Close it with "):
+        assert s in src, s
+
+
+@test
+def test_box_opens_only_after_a_successful_copy():
+    body = fn_body(js(), "finish")
+    assert "copyText(text, function (ok)" in body
+    assert "if (ok && FINISH_COPY[kind]) openFinish(kind);" in body
+    ct = fn_body(js(), "copyText")
+    assert ct.count("if (then) then(") >= 2, "both the clipboard and the legacy path report back"
+
+
+@test
+def test_close_page_arms_like_reset():
+    src = js()
+    arm = fn_body(src, "armClose")
+    assert "RESET_WINDOW_MS" in arm and '"Confirm"' in arm
+    assert "Click again to close this page" in arm
+    onc = fn_body(src, "onFinishClose")
+    assert "window.close()" in onc and "setTimeout" in onc and "300" in onc
+    assert "if (ev.key === \"Escape\" && finishOpen())" in src
+
+
+@test
+def test_copy_prompt_again_sits_under_the_buttons():
+    html = page()
+    box = html[html.index('id="finish"'):]
+    assert box.index('class="finish-actions"') < box.index('id="finish-recopy"')
+    assert 'data-tip="Copy the same prompt to the clipboard again"' in box
+    assert ">Copy prompt again<" in box
+    rc = fn_body(js(), "onFinishRecopy")
+    assert "copyText(text, function (ok)" in rc
+    assert '"Copied"' in rc and '"Copy failed, use the prompt pane"' in rc and "1500" in rc
+    assert "#finish-recopy" in css() or ".finish-recopy" in css()
+
+
+@test
+def test_overlay_css_blurs_and_respects_reduced_motion():
+    c = css()
+    assert "backdrop-filter: blur(6px)" in c
+    blk = c[c.index("/* ---- finish overlay"):]
+    assert "prefers-reduced-motion: reduce" in blk
+    assert ".finish-box" in blk and "translateY(8px)" in blk

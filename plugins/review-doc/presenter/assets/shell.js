@@ -300,6 +300,7 @@
   }
 
   function historyKeys(ev) {
+    if (finishOpen()) return;
     if (!(ev.ctrlKey || ev.metaKey)) return;
     var k = ev.key.toLowerCase();
     if (k === "z" && !ev.shiftKey) { ev.preventDefault(); undo(); }
@@ -2307,7 +2308,7 @@
   /* navigator.clipboard needs a secure context, and file:// is not one. Opening
      the page directly is the documented fallback, so the fallback needs a
      fallback. */
-  function copyText(text) {
+  function copyText(text, then) {
     function legacy() {
       var ta = doc.createElement("textarea");
       ta.value = text;
@@ -2326,6 +2327,7 @@
       flash(ok ? "Copied, now paste it to Claude"
                : "Copy failed, select the text above and copy it by hand",
             ok ? "good" : "bad", 4000);
+      if (then) then(ok);
     }
     if (navigator.clipboard && window.isSecureContext) {
       /* Race the write. writeText rejects when the document is not focused, and
@@ -2336,8 +2338,10 @@
       var done = function (ok) {
         if (settled) return;
         settled = true;
-        if (ok) flash("Copied, now paste it to Claude", "good", 4000);
-        else legacy();
+        if (ok) {
+          flash("Copied, now paste it to Claude", "good", 4000);
+          if (then) then(true);
+        } else legacy();
       };
       navigator.clipboard.writeText(text).then(function () { done(true); },
                                                function () { done(false); });
@@ -2361,7 +2365,10 @@
     }
     updatePrompt();
     var text = buildPrompt();
-    if (text) copyText(text);
+    if (!text) return;
+    copyText(text, function (ok) {
+      if (ok && FINISH_COPY[kind]) openFinish(kind);
+    });
   }
 
   function syncVerdict() {
@@ -2370,6 +2377,127 @@
       vs[i].setAttribute("aria-pressed",
         vs[i].getAttribute("data-verdict") === state.data.verdict ? "true" : "false");
     }
+  }
+
+  /* ---------------------------------------------------- finish overlay */
+
+  var IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || "");
+  var FINISH_COPY = {
+    approve: { title: "Approved", close: true,
+               text: "Your approve prompt has been copied. Paste it back to Claude and close this page." },
+    decline: { title: "Declined", close: true,
+               text: "Your decline prompt has been copied. Paste it back to Claude and close this page." },
+    changes: { title: "Waiting for Claude", close: false, wait: true,
+               text: "Your change request has been copied. Paste it back to Claude and wait for this page to reload." }
+  };
+  var finishKind = null, finishFrom = null, closeTimer = null;
+
+  function finishEl(id) { return doc.getElementById(id); }
+  function finishOpen() { return !!finishKind; }
+
+  function openFinish(kind) {
+    var c = FINISH_COPY[kind], root = finishEl("finish");
+    if (!c || !root) return;
+    closeBubble();
+    hideTip();
+    finishKind = kind;
+    finishFrom = doc.activeElement;
+    root.querySelector(".finish-title-text").textContent = c.title;
+    finishEl("finish-text").textContent = c.text;
+    root.classList.toggle("is-wait", !!c.wait);
+    var close = finishEl("finish-close");
+    close.hidden = !c.close;
+    disarmClose();
+    root.hidden = false;
+    void root.offsetWidth;            // commit the hidden state so the fade runs
+    root.classList.add("is-open");
+    (c.close ? close : finishEl("finish-cancel")).focus();
+  }
+
+  function closeFinish(restoreFocus) {
+    var root = finishEl("finish");
+    if (!root || !finishKind) return;
+    finishKind = null;
+    disarmClose();
+    root.classList.remove("is-open");
+    setTimeout(function () { if (!finishKind) root.hidden = true; }, reduceMotion ? 0 : 240);
+    if (restoreFocus !== false && finishFrom && finishFrom.focus) finishFrom.focus();
+  }
+
+  function onFinishCancel() {
+    closeFinish();
+    state.data.verdict = "";
+    syncVerdict();
+    save("verdict");
+    updatePrompt();
+  }
+
+  function closeArmed() { var b = finishEl("finish-close"); return !!b && b.classList.contains("armed"); }
+
+  function armClose() {
+    var b = finishEl("finish-close");
+    if (!b) return;
+    b.classList.add("armed");
+    b.querySelector(".lbl").textContent = "Confirm";
+    b.setAttribute("data-tip", "Click again to close this page");
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(disarmClose, RESET_WINDOW_MS);
+  }
+
+  function disarmClose() {
+    clearTimeout(closeTimer);
+    var b = finishEl("finish-close");
+    if (!b) return;
+    b.classList.remove("armed");
+    b.querySelector(".lbl").textContent = "Close page";
+    b.setAttribute("data-tip", "Close this page");
+  }
+
+  function forgetPage() { /* Task 5: clears this page's record */ }
+
+  /* Browsers only let a script close a window a script opened. A page opened by
+     VS Code or the system browser stays, so after a moment the box says how to
+     close it by hand. */
+  function onFinishClose() {
+    if (!closeArmed()) { armClose(); return; }
+    disarmClose();
+    if (finishKind === "approve") forgetPage();
+    window.close();
+    setTimeout(function () {
+      finishEl("finish-text").textContent =
+        "Your browser keeps this tab open. Close it with " + (IS_MAC ? "Cmd+W." : "Ctrl+W.");
+      finishEl("finish-close").hidden = true;
+      finishEl("finish-cancel").focus();
+    }, 300);
+  }
+
+  /* The clipboard is easy to overwrite before the paste happens, so every box
+     offers the same prompt once more. The footer status sits behind the
+     backdrop, so the button reports on itself. */
+  var recopyTimer = null;
+
+  function onFinishRecopy() {
+    var b = finishEl("finish-recopy"), text = buildPrompt();
+    if (!b || !text) return;
+    copyText(text, function (ok) {
+      b.textContent = ok ? "Copied" : "Copy failed, use the prompt pane";
+      b.classList.toggle("is-done", ok);
+      clearTimeout(recopyTimer);
+      recopyTimer = setTimeout(function () {
+        b.textContent = "Copy prompt again";
+        b.classList.remove("is-done");
+      }, 1500);
+    });
+  }
+
+  function trapFinishFocus(ev) {
+    if (!finishOpen() || ev.key !== "Tab") return;
+    var btns = [].slice.call(finishEl("finish").querySelectorAll("button:not([hidden])"));
+    if (!btns.length) return;
+    var i = btns.indexOf(doc.activeElement);
+    var next = ev.shiftKey ? (i <= 0 ? btns.length - 1 : i - 1) : (i + 1) % btns.length;
+    ev.preventDefault();
+    btns[next].focus();
   }
 
   /* -------------------------------------------------------- settings panel */
@@ -2821,9 +2949,18 @@
     bind("redo", redo);
     bind("reset", onReset);
     bind("t-prompt", togglePrompt);
+    bind("finish-cancel", onFinishCancel);
+    bind("finish-close", onFinishClose);
+    bind("finish-recopy", onFinishRecopy);
 
     doc.addEventListener("keydown", historyKeys, true);
+    doc.addEventListener("keydown", trapFinishFocus, true);
     doc.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape" && finishOpen()) {
+        ev.preventDefault();
+        if (closeArmed()) disarmClose(); else onFinishCancel();
+        return;
+      }
       if (ev.key === "Escape" && resetArmed()) { ev.preventDefault(); disarmReset(); return; }
       if (ev.key === "Escape" && bubble) { ev.preventDefault(); closeBubble(); }
     });
