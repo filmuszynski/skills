@@ -292,7 +292,11 @@ def test_copy_prompt_again_sits_under_the_buttons():
     assert ">Copy prompt again<" in box
     rc = fn_body(js(), "onFinishRecopy")
     assert "copyText(text, function (ok)" in rc
-    assert '"Copied"' in rc and '"Copy failed, use the prompt pane"' in rc and "1500" in rc
+    assert '"Copied"' in rc and '"Copy failed. Cancel, then copy from the prompt pane"' in rc and "1500" in rc
+    assert "{ keepPane: true }" in rc, "the recopy never opens the pane behind the backdrop"
+    ct = fn_body(js(), "copyText")
+    assert "function copyText(text, then, opts)" in ct
+    assert "!(opts && opts.keepPane)" in ct, "the footer copies still open the pane on failure"
     assert "#finish-recopy" in css() or ".finish-recopy" in css()
 
 

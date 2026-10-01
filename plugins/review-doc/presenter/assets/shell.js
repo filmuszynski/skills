@@ -2570,8 +2570,12 @@
 
   /* navigator.clipboard needs a secure context, and file:// is not one. Opening
      the page directly is the documented fallback, so the fallback needs a
-     fallback. */
-  function copyText(text, then) {
+     fallback.
+
+     opts.keepPane leaves the prompt pane alone on failure. The finish box
+     copies from in front of a backdrop, where an opened pane would sit out of
+     reach, so that caller says what to do on its own button instead. */
+  function copyText(text, then, opts) {
     function legacy() {
       var ta = doc.createElement("textarea");
       ta.value = text;
@@ -2582,7 +2586,7 @@
       var ok = false;
       try { ok = doc.execCommand("copy"); } catch (e) { ok = false; }
       doc.body.removeChild(ta);
-      if (!ok && !state.ui.prompt) {
+      if (!ok && !state.ui.prompt && !(opts && opts.keepPane)) {
         /* "Select the text above" needs the text on screen. */
         state.ui.prompt = true;
         applyPromptVisibility();
@@ -2764,14 +2768,15 @@
     var b = finishEl("finish-recopy"), text = buildPrompt();
     if (!b || !text) return;
     copyText(text, function (ok) {
-      b.textContent = ok ? "Copied" : "Copy failed, use the prompt pane";
+      b.textContent = ok ? "Copied" : "Copy failed. Cancel, then copy from the prompt pane";
       b.classList.toggle("is-done", ok);
       clearTimeout(recopyTimer);
+      /* The failure is a sentence to act on, so it stays longer. */
       recopyTimer = setTimeout(function () {
         b.textContent = "Copy prompt again";
         b.classList.remove("is-done");
-      }, 1500);
-    });
+      }, ok ? 1500 : 5000);
+    }, { keepPane: true });
   }
 
   function trapFinishFocus(ev) {
