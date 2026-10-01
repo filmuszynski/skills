@@ -289,3 +289,10 @@ def test_overlay_css_blurs_and_respects_reduced_motion():
     blk = c[c.index("/* ---- finish overlay"):]
     assert "prefers-reduced-motion: reduce" in blk
     assert ".finish-box" in blk and "translateY(8px)" in blk
+
+
+@test
+def test_hidden_close_button_really_hides():
+    assert "#finish-close[hidden] { display: none; }" in css()
+    body = fn_body(js(), "openFinish")
+    assert "if (!finishKind) finishFrom = doc.activeElement;" in body

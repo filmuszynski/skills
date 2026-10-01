@@ -1389,6 +1389,7 @@ body.prompt-hidden .verdict-row { margin-top: 0; }
 .finish.is-wait .finish-dot { display: inline-block; animation: finish-pulse 1.6s ease-in-out infinite; }
 @keyframes finish-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 #finish-close { display: inline-grid; transition: background-color .18s ease, border-color .18s ease, color .18s ease; }
+#finish-close[hidden] { display: none; }
 /* The longer label is laid out invisibly, so arming does not resize the button. */
 #finish-close::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; }
 #finish-close .lbl, #finish-close::after { grid-area: 1 / 1; }

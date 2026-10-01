@@ -2400,8 +2400,8 @@
     if (!c || !root) return;
     closeBubble();
     hideTip();
+    if (!finishKind) finishFrom = doc.activeElement;
     finishKind = kind;
-    finishFrom = doc.activeElement;
     root.querySelector(".finish-title-text").textContent = c.title;
     finishEl("finish-text").textContent = c.text;
     root.classList.toggle("is-wait", !!c.wait);
