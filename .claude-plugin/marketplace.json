@@ -7,6 +7,11 @@
       "name": "review-doc",
       "source": "./plugins/review-doc",
       "description": "Review Markdown documents and Claude's plans in the browser: comment, rewrite in place, approve or decline, then paste the answer back."
+    },
+    {
+      "name": "context-warning",
+      "source": "./plugins/context-warning",
+      "description": "Warns in colour when a session's context window passes 30, 40 and 50 percent, on every prompt from 30."
     }
   ]
 }

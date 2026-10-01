@@ -46,7 +46,7 @@ def test_marketplace_lists_the_plugin_with_a_description():
     with io.open(os.path.join(REPO, ".claude-plugin", "marketplace.json"), encoding="utf-8") as fh:
         m = json.load(fh)
     assert m.get("description") and "SPIKE" not in json.dumps(m)
-    assert [p["name"] for p in m["plugins"]] == ["review-doc"]
+    assert [p["name"] for p in m["plugins"]] == ["review-doc", "context-warning"]
 
 
 @test

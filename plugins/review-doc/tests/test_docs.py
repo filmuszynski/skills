@@ -11,6 +11,7 @@ import settings
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 SECTIONS = ["What it does", "Install", "First use", "Plan review", "Settings",
             "Advanced: choice screens", "Troubleshooting", "Manual install",
+            "Also in this repository: context-warning",
             "License and credit"]
 SHOTS = ["page", "comment", "edit", "settings", "reload", "plan", "choice"]
 

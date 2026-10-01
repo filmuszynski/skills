@@ -1,0 +1,8 @@
+{
+  "name": "context-warning",
+  "version": "1.0.0",
+  "description": "Warns in colour when a session's context window passes 30, 40 and 50 percent, on every prompt from 30.",
+  "author": { "name": "Filip Muszynski", "url": "https://github.com/filmuszynski" },
+  "homepage": "https://github.com/filmuszynski/skills",
+  "license": "MIT"
+}

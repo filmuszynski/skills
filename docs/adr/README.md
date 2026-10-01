@@ -19,3 +19,4 @@ Lightweight MADR style: Context, Decision, Consequences, Alternatives.
 | [0012](0012-links-name-127-0-0-1.md) | Review links name 127.0.0.1, not localhost | Accepted |
 | [0013](0013-opener-version-follows-the-plugin.md) | The opener's version follows the plugin; installed from the matching release | Accepted |
 | [0014](0014-public-repo-starts-from-one-commit.md) | The public repo starts from one commit | Accepted |
+| [0015](0015-context-warning-second-plugin.md) | context-warning is a second plugin, ported to Python | Accepted |

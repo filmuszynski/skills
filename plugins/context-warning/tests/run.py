@@ -6,6 +6,7 @@
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -293,6 +294,57 @@ def test_output_is_ascii_only():
     b.usage(550000)
     out = b.run()  # run() already decodes stdout as ASCII
     assert "\U0001F534" in line(out)
+
+
+# ---------------------------------------------------------------- packaging
+
+
+def read_json(*parts):
+    with io.open(os.path.join(*parts), encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def read_text(*parts):
+    with io.open(os.path.join(*parts), encoding="utf-8") as fh:
+        return fh.read()
+
+
+@test
+def test_plugin_manifest():
+    m = read_json(PLUGIN, ".claude-plugin", "plugin.json")
+    assert m["name"] == "context-warning" and m["license"] == "MIT"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", m["version"]), m["version"]
+    assert m["homepage"] == "https://github.com/filmuszynski/skills"
+
+
+@test
+def test_hooks_use_the_launcher_chain_on_both_events():
+    h = read_json(PLUGIN, "hooks", "hooks.json")["hooks"]
+    want = ('python3 "${CLAUDE_PLUGIN_ROOT}/hooks/context_warning.py" 2>/dev/null'
+            ' || python "${CLAUDE_PLUGIN_ROOT}/hooks/context_warning.py"')
+    assert set(h) == {"UserPromptSubmit", "PostToolUse"}, set(h)
+    assert h["PostToolUse"][0]["matcher"] == "*"
+    for event in h:
+        cmd = h[event][0]["hooks"][0]
+        assert cmd["type"] == "command" and cmd["command"] == want and cmd["timeout"] == 5
+
+
+@test
+def test_marketplace_lists_the_plugin():
+    m = read_json(REPO, ".claude-plugin", "marketplace.json")
+    entry = [p for p in m["plugins"] if p["name"] == "context-warning"]
+    assert entry and entry[0]["source"] == "./plugins/context-warning" and entry[0]["description"]
+
+
+@test
+def test_changelog_has_the_version():
+    v = read_json(PLUGIN, ".claude-plugin", "plugin.json")["version"]
+    assert "## [%s]" % v in read_text(PLUGIN, "CHANGELOG.md")
+
+
+@test
+def test_ci_runs_these_tests():
+    assert "python plugins/context-warning/tests/run.py" in read_text(REPO, ".github", "workflows", "test.yml")
 
 
 # ---------------------------------------------------------------- runner

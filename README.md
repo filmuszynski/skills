@@ -144,6 +144,17 @@ To install the VS Code extension by hand, download `review-doc-opener.vsix` from
 [latest release](https://github.com/filmuszynski/skills/releases/latest) and run
 `code --install-extension review-doc-opener.vsix`.
 
+## Also in this repository: context-warning
+
+A coloured line in the terminal when a session's context window passes 30, 40 and 50
+percent, on every prompt from 30. Install it from the same marketplace:
+
+```
+/plugin install context-warning@filmuszynski-skills
+```
+
+Details in [plugins/context-warning/README.md](plugins/context-warning/README.md).
+
 ## License and credit
 
 MIT, see [LICENSE](LICENSE). Made by [Filip Muszynski](https://github.com/filmuszynski).
