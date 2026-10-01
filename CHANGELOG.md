@@ -6,6 +6,20 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-01
+
+### Fixed
+- A plan's At a glance keeps everything written under a field in that field's row, in
+  the order written: a quote, list, table or code block now sits right under the line
+  that introduces it instead of below the whole table. Text before the first field
+  leads above the table.
+- The page type pill stays in front of the title when a cut-off title is shown whole;
+  only the buttons slide away.
+- The Request changes icon sits 1px lower than in 1.0.1.
+
+### Changed
+- The footer line is left-aligned again.
+
 ## [1.0.1] - 2026-10-01
 
 ### Added
