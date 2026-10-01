@@ -3,6 +3,7 @@ import io
 import json
 import os
 import time
+from types import SimpleNamespace
 
 from harness import test, new_home
 
@@ -135,3 +136,49 @@ def test_prune_keeps_live_pages_and_young_orphans():
 @test
 def test_prune_without_folder_is_zero():
     assert drafts.prune(home=new_home()) == 0
+
+
+def stat_with(**kw):
+    def fake(path):
+        return SimpleNamespace(**kw)
+    return fake
+
+
+@test
+def test_created_uses_birthtime_when_there_is_one():
+    rec = {"draft": 1, "firstRendered": 1, "pending": None}
+    got = drafts.created("x.md", rec, stat=stat_with(st_birthtime=1759327320.5, st_ctime=1.0), nt=False)
+    assert got == ("Created", 1759327320500), got
+
+
+@test
+def test_created_uses_ctime_on_windows():
+    rec = {"draft": 1, "firstRendered": 1, "pending": None}
+    got = drafts.created("x.md", rec, stat=stat_with(st_ctime=1759327320.0), nt=True)
+    assert got == ("Created", 1759327320000), got
+
+
+@test
+def test_created_falls_back_to_first_reviewed():
+    rec = {"draft": 1, "firstRendered": 1759327320000, "pending": None}
+    assert drafts.created("x.md", rec, stat=stat_with(st_ctime=5.0), nt=False) == ("First reviewed", 1759327320000)
+    assert drafts.created("x.md", rec, stat=stat_with(st_birthtime=0, st_ctime=5.0), nt=False)[0] == "First reviewed"
+
+    def missing(path):
+        raise OSError("gone")
+    assert drafts.created("x.md", rec, stat=missing, nt=True) == ("First reviewed", 1759327320000)
+
+
+@test
+def test_fmt_is_day_month_year_hours_minutes_local():
+    ms = int(time.mktime((2026, 10, 1, 22, 14, 0, 0, 0, -1)) * 1000)
+    assert drafts.fmt(ms) == "01.10.2026 22:14", drafts.fmt(ms)
+
+
+@test
+def test_facts_are_three_rows_in_order():
+    ms = int(time.mktime((2026, 10, 1, 22, 14, 0, 0, 0, -1)) * 1000)
+    rec = {"draft": 3, "firstRendered": ms, "pending": None}
+    got = drafts.facts(rec, os.path.join(new_home(), "missing.md"), ms)
+    assert got == [("Draft", "3"), ("First reviewed", "01.10.2026 22:14"),
+                   ("Last edited", "01.10.2026 22:14")], got

@@ -144,3 +144,30 @@ def prune(home=None, now=None):
         except OSError:
             pass
     return gone
+
+
+def created(source_path, rec, stat=os.stat, nt=None):
+    """("Created", ms) where the file system records a creation time, else the first
+    render under its own name. Linux keeps none, and a time is never shown under a
+    label it does not mean."""
+    nt = (os.name == "nt") if nt is None else nt
+    try:
+        st = stat(source_path)
+        birth = getattr(st, "st_birthtime", None)
+        if birth:
+            return ("Created", int(birth * 1000))
+        if nt:
+            return ("Created", int(st.st_ctime * 1000))   # creation time on Windows
+    except OSError:
+        pass
+    return ("First reviewed", rec["firstRendered"])
+
+
+def fmt(ms):
+    return time.strftime("%d.%m.%Y %H:%M", time.localtime(ms / 1000.0))
+
+
+def facts(rec, source_path, source_mtime):
+    """The three rows the At a glance box ends with."""
+    label, ms = created(source_path, rec)
+    return [("Draft", str(rec["draft"])), (label, fmt(ms)), ("Last edited", fmt(source_mtime))]
