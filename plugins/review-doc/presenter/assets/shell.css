@@ -1455,7 +1455,7 @@ body.prompt-hidden .verdict-row { margin-top: 0; }
 }
 
 @media print {
-  header, footer, .orphans, .stale, .tbl-bar, .credit-tail { display: none; }
+  header, footer, .orphans, .stale, .tbl-bar, .credit-tail, .finish { display: none; }
   body { display: block; overflow: visible; }
   #doc { overflow: visible; height: auto; }
 }

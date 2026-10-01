@@ -2734,13 +2734,15 @@
 
   /* Browsers only let a script close a window a script opened. A page opened by
      VS Code or the system browser stays, so after a moment the box says how to
-     close it by hand. */
+     close it by hand. A Cancel inside that moment has already closed the box,
+     so the late message stays out of it. */
   function onFinishClose() {
     if (!closeArmed()) { armClose(); return; }
     disarmClose();
     if (finishKind === "approve") forgetPage();
     window.close();
     setTimeout(function () {
+      if (!finishKind) return;
       finishEl("finish-text").textContent =
         "Your browser keeps this tab open. Close it with " + (IS_MAC ? "Cmd+W." : "Ctrl+W.");
       finishEl("finish-close").hidden = true;

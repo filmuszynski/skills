@@ -96,6 +96,20 @@ def test_credit_hides_settings_in_print():
 
 
 @test
+def test_finish_overlay_never_prints():
+    printed = css().split("@media print {", 1)[1].split("\n}", 1)[0]
+    hidden = [l.split("{")[0] for l in printed.splitlines() if "display: none" in l][0]
+    assert re.search(r"\.finish(?![-\w])", hidden), "the finish overlay is hidden in print"
+
+
+@test
+def test_refused_close_message_cannot_fire_after_cancel():
+    onc = fn_body(js(), "onFinishClose")
+    cb = onc[onc.index("setTimeout(function () {"):]
+    assert cb.split("\n")[1].strip() == "if (!finishKind) return;", cb
+
+
+@test
 def test_mark_expiry_follows_the_stale_hours_setting():
     src = js()
     assert "EXPIRE_MS = 96" not in src, "no fixed window any more"
