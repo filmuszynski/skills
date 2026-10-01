@@ -20,7 +20,7 @@ Run the review-doc settings command and show the user what it prints.
    |---|---|---|---|
    | `stale-hours` | 1 to 720 | 96 | Pages older than this many hours are deleted, and unsaved comments older than this are dropped |
    | `auto-open` | on, off | on | Opens each new page right after it is rendered |
-| `tooltips` | on, off | on | Shows the small labels that explain each button on a review page |
+   | `tooltips` | on, off | on | Shows the small labels that explain each button on a review page |
    | `md` | on, off | on | Markdown document pages |
    | `html` | on, off | on | HTML document pages (they arrive in v1.1) |
    | `plan` | on, off | on | Plan pages, rendered automatically when Claude writes a plan |

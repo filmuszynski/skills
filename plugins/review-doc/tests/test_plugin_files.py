@@ -37,6 +37,9 @@ def test_settings_command_wraps_the_cli():
     for name in settings.CLI_NAMES:
         assert "`%s`" % name in body, name
     assert "—" not in body
+    # The table sits inside list item 3; a row at column 0 ends the item and splits it.
+    rows = [l for l in body.splitlines() if l.lstrip().startswith("|")]
+    assert rows and all(l.startswith("   |") for l in rows), [l for l in rows if not l.startswith("   |")]
 
 
 @test
