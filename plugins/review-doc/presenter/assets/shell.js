@@ -82,8 +82,19 @@
   function onServer() { return /^https?:$/.test(location.protocol) && !!window.fetch; }
 
   function rememberSettings(s) {
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ stale_hours: s.stale_hours })); }
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        stale_hours: s.stale_hours, show_tips: s.show_tips !== false
+      }));
+    }
     catch (e) { /* blocked storage: the next load asks the server again */ }
+  }
+
+  function cachedShowTips() {
+    try {
+      var got = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+      return !(got && got.show_tips === false);
+    } catch (e) { return true; }
   }
 
   function cachedStaleHours() {
@@ -2435,6 +2446,7 @@
         return c;
       }
       var auto = box("Open new pages on their own", s.auto_open);
+      var tips = box("Show tooltips", s.show_tips !== false);
       b.appendChild(mkEl("p", "bubble-label", "Page types"));
       var boxes = {};
       KIND_ROWS.forEach(function (k) {
@@ -2466,7 +2478,8 @@
       }
 
       function commit() {
-        var update = { stale_hours: Number(hours.value), auto_open: auto.checked, kinds: {} };
+        var update = { stale_hours: Number(hours.value), auto_open: auto.checked,
+                       show_tips: tips.checked, kinds: {} };
         KIND_ROWS.forEach(function (k) { if (!k.off) update.kinds[k.key] = boxes[k.key].checked; });
         err.hidden = true;
         hours.removeAttribute("aria-invalid");
@@ -2475,6 +2488,7 @@
           save.disabled = false;
           if (res.ok) {
             rememberSettings(res.settings);
+            applyTipsSetting(res.settings);
             /* Other pages' marks follow the new window at once; this page's own
                are in use and are never removed under it. */
             expireOld(hoursMs(res.settings.stale_hours), LSKEY);
@@ -2604,6 +2618,15 @@
   var TIP_DELAY = 300, TIP_WARM_MS = 400;
   var tipEl = null, tipFor = null, tipTimer = null, tipHiddenAt = 0;
 
+  /* Tooltips are a setting. Off means none at all, focus included; every
+     button still has its aria-label, so nothing is lost to a screen reader. */
+  var tipsOn = true;
+
+  function applyTipsSetting(s) {
+    tipsOn = !s || s.show_tips !== false;
+    if (!tipsOn) hideTip();
+  }
+
   function tipTarget(node) {
     while (node && node !== doc.body) {
       if (node.nodeType === 1 && node.getAttribute("data-tip")) return node;
@@ -2627,6 +2650,7 @@
   }
 
   function showTip(el) {
+    if (!tipsOn) return;
     if (!tipEl) {
       tipEl = doc.createElement("div");
       tipEl.className = "tip";
@@ -2683,6 +2707,7 @@
      milliseconds; nothing is clickable in that time that would lose work. */
   function wire() {
     fetchSettings().then(function (s) {
+      applyTipsSetting(s || { show_tips: cachedShowTips() });
       start(s ? s.stale_hours : cachedStaleHours());
     });
   }

@@ -180,3 +180,32 @@ def test_reset_keeps_the_extension_answer():
     after = settings.reset(h)
     assert after["stale_hours"] == 96 and after["vscode_asked"] is True, after
     assert settings.load(h)["vscode_asked"] is True
+
+
+@test
+def test_show_tips_defaults_on_and_survives_bad_values():
+    h = new_home()
+    assert settings.load(h)["show_tips"] is True
+    write_raw(h, json.dumps({"stale_hours": 48, "show_tips": "yes"}))
+    got = settings.load(h)
+    assert got["show_tips"] is True, "wrong type falls back to on"
+    assert got["stale_hours"] == 48, "the other fields are kept"
+    write_raw(h, json.dumps({"stale_hours": 48}))
+    assert settings.load(h)["show_tips"] is True, "an old file without the key loads as on"
+
+
+@test
+def test_tooltips_cli_and_api():
+    h = new_home()
+    for raw, want in (("off", False), ("on", True), ("0", False)):
+        assert settings.set_value("tooltips", raw, h)["show_tips"] is want, raw
+    assert settings.apply({"show_tips": True}, h)["show_tips"] is True
+    assert settings.apply({"show_tips": False}, h)["show_tips"] is False
+    try:
+        settings.apply({"show_tips": "no"}, h)
+        raise AssertionError("a string must be refused")
+    except settings.SettingError as exc:
+        assert exc.field == "show_tips"
+    assert settings.load(h)["show_tips"] is False, "a refused update saves nothing"
+    assert "tooltips" in settings._show(settings.load(h))
+    assert settings.reset(h)["show_tips"] is True

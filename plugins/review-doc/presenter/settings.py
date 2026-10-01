@@ -20,12 +20,14 @@ import paths  # noqa: E402
 DEFAULTS = {
     "stale_hours": 96,
     "auto_open": True,
+    "show_tips": True,
     "kinds": {"md": True, "html": True, "plan": True, "choice": True},
     "vscode_asked": False,
 }
 CLI_NAMES = {
     "stale-hours": ("stale_hours",),
     "auto-open": ("auto_open",),
+    "tooltips": ("show_tips",),
     "md": ("kinds", "md"),
     "html": ("kinds", "html"),
     "plan": ("kinds", "plan"),
@@ -51,7 +53,7 @@ def _clean(raw):
     cfg = copy.deepcopy(DEFAULTS)
     if not isinstance(raw, dict):
         return cfg
-    for key in ("stale_hours", "auto_open", "vscode_asked"):
+    for key in ("stale_hours", "auto_open", "show_tips", "vscode_asked"):
         if key in raw and _valid((key,), raw[key]):
             cfg[key] = raw[key]
     kinds = raw.get("kinds")
@@ -119,7 +121,7 @@ def set_value(cli_name, raw, home=None):
 
 
 def reset(home=None):
-    """The six user settings back to their defaults. Whether the extension was
+    """The seven user settings back to their defaults. Whether the extension was
     offered is not a setting, so the offer is not repeated after a reset."""
     fresh = copy.deepcopy(DEFAULTS)
     fresh["vscode_asked"] = load(home)["vscode_asked"]
@@ -137,9 +139,9 @@ def apply(update, home=None):
             if not _valid((key,), value):
                 raise SettingError("stale_hours must be a whole number from 1 to 720", key)
             cfg[key] = value
-        elif key == "auto_open":
+        elif key in ("auto_open", "show_tips"):
             if not isinstance(value, bool):
-                raise SettingError("auto_open must be true or false", key)
+                raise SettingError("%s must be true or false" % key, key)
             cfg[key] = value
         elif key == "kinds":
             if not isinstance(value, dict):
@@ -162,7 +164,8 @@ def kind_enabled(cli_name, home=None):
 def _show(cfg):
     def onoff(b):
         return "on" if b else "off"
-    rows = [("stale-hours", str(cfg["stale_hours"])), ("auto-open", onoff(cfg["auto_open"]))]
+    rows = [("stale-hours", str(cfg["stale_hours"])), ("auto-open", onoff(cfg["auto_open"])),
+            ("tooltips", onoff(cfg["show_tips"]))]
     rows += [(k, onoff(cfg["kinds"][k])) for k in ("md", "html", "plan", "choice")]
     return "\n".join("%-12s %s" % r for r in rows)
 

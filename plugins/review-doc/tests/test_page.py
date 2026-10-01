@@ -182,3 +182,21 @@ def test_credit_line_sits_on_the_text_column():
     assert "font-size: .8em" in rule
     assert "max-width: calc(57.3em / .8)" in rule
     assert "calc(1.73em / .8)" in rule
+
+
+@test
+def test_tooltips_can_be_switched_off():
+    src = js()
+    show = src.split("function showTip(el) {", 1)[1][:200]
+    assert "if (!tipsOn) return;" in show, "the one tooltip function honours the setting"
+    apply = src.split("function applyTipsSetting(s) {", 1)[1].split("\n  }", 1)[0]
+    assert "show_tips !== false" in apply, "missing or unknown means on"
+    assert "hideTip()" in apply, "switching off hides a tooltip already showing"
+    remember = src.split("function rememberSettings(s) {", 1)[1].split("\n  }", 1)[0]
+    assert "show_tips" in remember, "a page without the server uses the last value it heard"
+    panel = src.split("function openSettings(btn, s) {", 1)[1].split("function wireSettings", 1)[0]
+    assert 'box("Show tooltips", s.show_tips' in panel
+    assert "show_tips: tips.checked" in panel
+    assert "applyTipsSetting(res.settings)" in panel, "a save takes effect on this page at once"
+    wire = src.split("function wire() {", 1)[1].split("\n  }", 1)[0]
+    assert "applyTipsSetting(" in wire and "cachedShowTips()" in wire

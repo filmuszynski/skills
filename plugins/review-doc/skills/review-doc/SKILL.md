@@ -119,9 +119,9 @@ cannot tell whether to proceed.
 
 ## Settings
 
-Six settings, changed with `/review-doc:settings` or with ⚙ Settings at the foot of
+Seven settings, changed with `/review-doc:settings` or with ⚙ Settings at the foot of
 every page served locally: `stale-hours` (how long pages and unsaved comments are
-kept, default 96), `auto-open`, and the page types `md`, `html`, `plan` and `choice`.
+kept, default 96), `auto-open`, `tooltips`, and the page types `md`, `html`, `plan` and `choice`.
 
 ## The VS Code extension (asked once)
 
