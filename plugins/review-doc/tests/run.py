@@ -1738,6 +1738,29 @@ def test_header_buttons_one_height_and_mode_plate_slides():
     assert 'data-mode="edit" data-label="Edit text"' in html
 
 
+@test
+def test_blank_table_header_is_marked_and_hidden():
+    md = "| | |\n|---|---|\n| Date | 01.10.2026 |\n"
+    html = layout_plan._md(md)
+    assert '<thead class="blank">' in html, html
+    css = io.open(os.path.join(PRESENTER, "assets", "shell.css"), encoding="utf-8").read()
+    assert "#doc thead.blank { display: none; }" in css
+
+
+@test
+def test_header_with_one_named_cell_is_kept():
+    html = layout_plan._md("| Key | |\n|---|---|\n| a | b |\n")
+    assert "<thead>" in html and 'class="blank"' not in html
+
+
+@test
+def test_blank_header_table_still_gets_ids_and_rows():
+    md = "| | |\n|---|---|\n| a | b |\n| c | d |\n"
+    html = layout_tables.stamp_tables(layout_plan._md(md), md, "s1", set())
+    assert "data-table-id" in html and html.count("data-row-id") == 2, html
+    assert '<thead class="blank">' in html
+
+
 # --------------------------------------------------------------------------
 
 

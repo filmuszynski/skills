@@ -654,6 +654,8 @@ main { min-height: 0; }
 #doc table { border-collapse: collapse; width: 100%; margin: .4em 0 .8em; font-size: .93em; }
 #doc th, #doc td { border: 1px solid var(--line); padding: .43em .64em; vertical-align: top; text-align: left; }
 #doc th { background: var(--surface); }
+/* A header row with nothing in it is Markdown's price for a table, not content. */
+#doc thead.blank { display: none; }
 #doc hr { border: 0; border-top: 1px solid var(--line); margin: .93em 0; }
 #doc code { background: var(--surface); padding: .07em .29em; border-radius: 3px; font-size: .87em; font-family: var(--mono); }
 

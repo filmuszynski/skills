@@ -31,10 +31,26 @@ def _hash(text, prefix):
     return prefix + hashlib.sha1(norm.encode("utf-8")).hexdigest()[:8]
 
 
+RE_THEAD = re.compile(r"<thead>\s*<tr>(.*?)</tr>\s*</thead>", re.S)
+RE_HEAD_CELL = re.compile(r"<th\b[^>]*>(.*?)</th>", re.S)
+
+
+def _mark_blank_heads(html):
+    """Markdown needs a header row, so a key/value table written as | | | gets
+    an empty shaded bar. Its header stays in the DOM, because the table toolbar
+    and the serialiser count columns from it, and is only hidden."""
+    def one(m):
+        cells = RE_HEAD_CELL.findall(m.group(1))
+        if cells and all(not re.sub(r"<[^>]+>|&nbsp;|\s", "", c) for c in cells):
+            return m.group(0).replace("<thead>", '<thead class="blank">', 1)
+        return m.group(0)
+    return RE_THEAD.sub(one, html)
+
+
 def _md(text):
     if not text or not text.strip():
         return ""
-    return markdown.markdown(text, extensions=MD_EXTENSIONS)
+    return _mark_blank_heads(markdown.markdown(text, extensions=MD_EXTENSIONS))
 
 
 def _mask_pre(html):
