@@ -1706,6 +1706,17 @@ def test_page_checks_source_and_expires_old_marks():
     assert "/api/review-source?slug=" in js
 
 
+@test
+def test_request_changes_loop_sits_higher_with_more_air():
+    """Filip, 01.10.2026: the loop sat 2px too low and 2px too close to its label."""
+    css = io.open(os.path.join(PRESENTER, "assets", "shell.css"), encoding="utf-8").read()
+    loop = css.split(chr(10) + ".ico-loop {")[1].split("}")[0]
+    assert "vertical-align: calc(-.12em + 2px);" in loop
+    assert "margin-right: 2px;" in loop
+    reset = css.split(chr(10) + ".ico-reset {")[1].split("}")[0]
+    assert "margin-right" not in reset, "the header reset loop is not moved"
+
+
 # --------------------------------------------------------------------------
 
 
