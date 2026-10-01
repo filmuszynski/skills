@@ -27,6 +27,10 @@ RE_H2 = re.compile(r"^##\s+(.+?)\s*$")
 RE_STEP = re.compile(r"^-\s+\[[ xX]\]\s+(.*)$")
 RE_META = re.compile(r"^\*\*([A-Za-z][A-Za-z ]*?):\*\*\s*(.*)$")
 RE_FENCE = re.compile(r"^\s*(```|~~~)")
+# A line that starts a block of its own never continues the field above it.
+RE_NOT_WRAP = re.compile(r"^\s*(#|>|[-*+]\s|\d+[.)]\s|\||```|~~~|-{3,}\s*$|\*{3,}\s*$|_{3,}\s*$)")
+AGENTIC_BANNER = "> **For agentic workers:**"
+RE_RULE = re.compile(r"^\s*(-{3,}|\*{3,}|_{3,})\s*$")
 RE_BOLD_LEAD = re.compile(r"^\*\*(.+?)\*\*:?\s*")
 
 EDITABLE_TAGS = ("p", "h2", "h3", "h4", "td", "th")
@@ -84,6 +88,7 @@ def parse(raw):
     lines = text.split("\n")
 
     title, meta, last_meta = "", {}, None
+    preamble, in_banner = [], False
     sections, current = [], None
     plain_count = 0
     in_fence = False
@@ -102,8 +107,16 @@ def parse(raw):
         sections.append(current)
 
     for line in lines:
-        if RE_FENCE.match(line):
+        fence = RE_FENCE.match(line)
+        if fence:
             in_fence = not in_fence
+        # A code block before the first section goes to the preamble whole: the
+        # opening line (in_fence just turned True), the lines inside, and the
+        # closing line (fence matched, in_fence back to False). Each exactly once.
+        if current is None and title and (in_fence or fence):
+            preamble.append(line)
+            last_meta = None
+            continue
 
         if not in_fence:
             if not title and line.startswith("# "):
@@ -134,14 +147,26 @@ def parse(raw):
             if current is None:
                 mm = RE_META.match(line)
                 if mm:
-                    last_meta = mm.group(1).strip()
+                    last_meta, in_banner = mm.group(1).strip(), False
                     meta[last_meta] = mm.group(2).strip()
                     continue
-                if last_meta and line.strip() and not line.startswith(("#", ">")):
+                if last_meta and line.strip() and not RE_NOT_WRAP.match(line):
                     # A field wrapped over several lines: plans wrap at about 90 columns.
                     meta[last_meta] = (meta[last_meta] + " " + line.strip()).strip()
                     continue
                 last_meta = None
+                # The writing-plans banner speaks to the executing agent; it is not
+                # part of what is reviewed. Everything else after the title is kept,
+                # so a quote or a list under a field reaches the page.
+                if line.startswith(AGENTIC_BANNER):
+                    in_banner = True
+                if in_banner:
+                    if line.startswith(">"):
+                        continue
+                    in_banner = False
+                if title:
+                    preamble.append(line)
+                continue
 
         if current is not None:
             current["lines"].append(line)
@@ -156,7 +181,14 @@ def parse(raw):
         else:
             seen[sec["id"]] = 0
 
-    return {"title": title or "Plan", "meta": meta, "sections": sections}
+    # A rule at either end only frames the header; it is not content to show.
+    while preamble and (not preamble[0].strip() or RE_RULE.match(preamble[0])):
+        preamble.pop(0)
+    while preamble and (not preamble[-1].strip() or RE_RULE.match(preamble[-1])):
+        preamble.pop()
+
+    return {"title": title or "Plan", "meta": meta, "sections": sections,
+            "preamble": "\n".join(preamble)}
 
 
 # ------------------------------------------------------------------- render
@@ -241,14 +273,17 @@ def _section_html(sec, used):
 
 
 def _meta_html(plan):
-    if not plan["meta"]:
+    notes = plan.get("preamble", "")
+    if not plan["meta"] and not notes:
         return ""
     rows = "".join(
         "<tr><th>%s</th><td>%s</td></tr>" % (_esc(k), _md(v).replace("<p>", "").replace("</p>", ""))
         for k, v in plan["meta"].items()
     )
+    table = "<table>%s</table>" % rows if rows else ""
+    extra = '<div class="glance-notes">%s</div>' % _md(notes) if notes else ""
     return ('<div class="sec" data-sec="__meta"><div class="sec-tag"></div>'
-            "<h2>At a glance</h2><table>%s</table></div>" % rows)
+            "<h2>At a glance</h2>%s%s</div>" % (table, extra))
 
 
 def slug_for(source):

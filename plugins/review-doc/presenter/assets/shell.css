@@ -536,6 +536,11 @@ main { min-height: 0; }
    than moving the block. */
 .sec[data-sec="__meta"],
 .sec[data-sec="__meta"]:hover { border: 2px solid var(--accent); }
+
+/* What stood between the header fields, a quoted request or a list, in the
+   document's own type under the table. */
+.sec[data-sec="__meta"] .glance-notes { margin-top: .9em; }
+.sec[data-sec="__meta"] .glance-notes > :first-child { margin-top: 0; }
 .sec-tools { margin-left: auto; display: flex; gap: calc(15px * var(--zoom, 1) * .37); align-items: center; }
 
 /* The controls stay quiet until the section is hovered or a decision is on
