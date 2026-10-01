@@ -54,8 +54,8 @@ ACTIONS = [
     {"verdict": "changes", "icon": "", "icon_cls": shell.LOOP_CLS,
      "label": "Request changes", "cls": "changes",
      "tip": "Ask for a revised document and copy the prompt for Claude",
-     "line": "VERDICT: revise and re-present. Apply everything below, regenerate "
-             "the page and give me the link again."},
+     "line": "VERDICT: revise and re-present. Apply everything below and regenerate "
+             "the page; the open page reloads by itself."},
 ]
 
 

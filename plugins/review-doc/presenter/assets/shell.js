@@ -2367,7 +2367,12 @@
     var text = buildPrompt();
     if (!text) return;
     copyText(text, function (ok) {
-      if (ok && FINISH_COPY[kind]) openFinish(kind);
+      if (!ok || !FINISH_COPY[kind]) return;
+      if (kind === "changes") {
+        state.data.pending = { sentAt: Date.now(), sourceMtime: D.meta.sourceMtime };
+        persist();
+      }
+      openFinish(kind);
     });
   }
 
@@ -2411,6 +2416,7 @@
     root.hidden = false;
     void root.offsetWidth;            // commit the hidden state so the fade runs
     root.classList.add("is-open");
+    if (c.wait) startWaiting();
     (c.close ? close : finishEl("finish-cancel")).focus();
   }
 
@@ -2418,6 +2424,7 @@
     var root = finishEl("finish");
     if (!root || !finishKind) return;
     finishKind = null;
+    stopWaiting();
     disarmClose();
     root.classList.remove("is-open");
     setTimeout(function () { if (!finishKind) root.hidden = true; }, reduceMotion ? 0 : 240);
@@ -2427,6 +2434,7 @@
   function onFinishCancel() {
     closeFinish();
     state.data.verdict = "";
+    state.data.pending = null;
     syncVerdict();
     save("verdict");
     updatePrompt();
@@ -3009,6 +3017,64 @@
         flash("100%", "");
       }
     });
+  }
+
+  /* ------------------------------------------------- waiting for Claude */
+
+  /* While the Waiting box is up, and only then, the page asks every two
+     seconds whether its source changed. Claude often writes a file in several
+     edits, so it reloads only once the newer time has held for one more poll. */
+  var POLL_MS = 2000;
+  var pollTimer = null, settle = null;
+
+  function settleStep(st, mtime, built) {
+    if (!(mtime > built)) return { last: mtime, quiet: 0, reload: false };
+    var quiet = mtime === st.last ? st.quiet + 1 : 0;
+    return { last: mtime, quiet: quiet, reload: quiet >= 1 };
+  }
+
+  function waitNote(extra) {
+    var el = doc.getElementById("finish-text");
+    if (el && extra && el.textContent.indexOf(extra) < 0) el.textContent += " " + extra;
+  }
+
+  function startWaiting() {
+    stopWaiting();
+    if (!onServer() || typeof D.meta.sourceMtime !== "number") {
+      doc.getElementById("finish-text").textContent =
+        "Your change request has been copied. Paste it back to Claude, then reload this page when the revision is in.";
+      return;
+    }
+    settle = { last: null, quiet: 0 };
+    pollTimer = setTimeout(poll, POLL_MS);
+  }
+
+  function stopWaiting() {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+    settle = null;
+  }
+
+  function poll() {
+    if (!settle) return;
+    fetch("/api/review-source?slug=" + encodeURIComponent(D.meta.slug), { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (got) {
+        if (!settle) return;
+        if (!got || typeof got.mtime !== "number") {
+          stopWaiting();
+          waitNote("The page could not be reached. Reload it once Claude is done.");
+          return;
+        }
+        settle = settleStep(settle, got.mtime, D.meta.sourceMtime);
+        if (settle.reload) { stopWaiting(); persist(); location.reload(); return; }
+        pollTimer = setTimeout(poll, POLL_MS);
+      })
+      .catch(function () {
+        if (!settle) return;
+        stopWaiting();
+        waitNote("The page could not be reached. Reload it once Claude is done.");
+      });
   }
 
   /* ---------------------------------------------------------- stale source */

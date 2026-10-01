@@ -253,7 +253,7 @@ def test_finish_overlay_markup_and_copy():
 def test_box_opens_only_after_a_successful_copy():
     body = fn_body(js(), "finish")
     assert "copyText(text, function (ok)" in body
-    assert "if (ok && FINISH_COPY[kind]) openFinish(kind);" in body
+    assert "if (!ok || !FINISH_COPY[kind]) return;" in body
     ct = fn_body(js(), "copyText")
     assert ct.count("if (then) then(") >= 2, "both the clipboard and the legacy path report back"
 

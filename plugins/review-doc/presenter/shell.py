@@ -236,8 +236,8 @@ PLAN_ACTIONS = [
     {"verdict": "changes", "icon": "", "icon_cls": LOOP_CLS,
      "label": "Request changes", "cls": "changes",
      "tip": "Ask for a revised plan and copy the prompt for Claude",
-     "line": "VERDICT: revise and re-present. Apply everything below, regenerate the "
-             "page and give me the link again. Do not start building until I have "
+     "line": "VERDICT: revise and re-present. Apply everything below and regenerate the "
+             "page; the open page reloads by itself. Do not start building until I have "
              "seen the revision."},
 ]
 

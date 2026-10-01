@@ -1032,7 +1032,7 @@ def test_the_three_verdicts_instruct_differently():
     assert len(set(lines.values())) == 3, "three chips, three instructions"
 
     # only one of them asks for another round
-    assert "give me the link again" in lines["changes"]
+    assert "the open page reloads by itself" in lines["changes"]
     assert "Do not start building" in lines["changes"]
     for other in ("approve", "decline"):
         assert "link again" not in lines[other],             "%s must not ask to be re-presented" % other
@@ -1764,6 +1764,52 @@ def test_blank_header_table_still_gets_ids_and_rows():
 
 
 # --------------------------------------------------------------------------
+
+
+@test
+def test_settle_waits_for_two_unchanged_polls():
+    out = run_js(["settleStep"], """(function () {
+      var st = {last: null, quiet: 0}, seen = [];
+      [100, 100, 150, 150, 150].forEach(function (m) {
+        st = settleStep(st, m, 100); seen.push(st.reload);
+      });
+      return seen; })()""")
+    assert out == [False, False, False, True, True], out
+
+
+@test
+def test_settle_resets_when_the_file_changes_again():
+    out = run_js(["settleStep"], """(function () {
+      var st = {last: null, quiet: 0}, seen = [];
+      [150, 160, 170, 170].forEach(function (m) {
+        st = settleStep(st, m, 100); seen.push(st.reload);
+      });
+      return seen; })()""")
+    assert out == [False, False, False, True], out
+
+
+@test
+def test_polling_only_while_waiting():
+    src = shell._asset("shell.js")
+    assert "var POLL_MS = 2000;" in src
+    assert src.count("setInterval(") == 0, "one timeout chain, not an interval"
+    of = src[src.index("function openFinish("):src.index("function closeFinish(")]
+    assert "if (c.wait) startWaiting();" in of
+    cf = src[src.index("function closeFinish("):src.index("function onFinishCancel(")]
+    assert "stopWaiting();" in cf
+    assert "Paste it back to Claude, then reload this page when the revision is in." in src
+    assert "The page could not be reached. Reload it once Claude is done." in src
+
+
+@test
+def test_request_changes_lines_say_the_page_reloads():
+    plan = [a for a in shell.PLAN_ACTIONS if a["verdict"] == "changes"][0]["line"]
+    docl = [a for a in layout_doc.ACTIONS if a["verdict"] == "changes"][0]["line"]
+    for line in (plan, docl):
+        assert "the open page reloads by itself" in line and "link again" not in line
+    skill = io.open(os.path.join(os.path.dirname(PRESENTER), "skills", "review-md", "SKILL.md"),
+                    encoding="utf-8").read()
+    assert "reloads itself" in skill
 
 
 NEW_TEST_MODULES = ["test_privacy", "test_vendor", "test_settings", "test_build", "test_version", "test_write",

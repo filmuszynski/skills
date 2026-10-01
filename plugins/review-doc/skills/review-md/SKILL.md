@@ -56,6 +56,8 @@ with the same command. The link does not change. A page that is already open not
 that its source changed, shows a Reload strip, and the server rebuilds it on the next
 request.
 
+After a change request, render again as usual. The open page reloads itself once the new build is in, so do not ask the user to reload; still hand the link back.
+
 Comments are anchored to their text, not to a position. Inserting a section above a
 commented one does not move the comment, and whitespace or line breaks never break a
 match. A passage that was edited is found again by its start and end; one that is gone
