@@ -6,6 +6,24 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-01
+
+### Added
+- A `tooltips` setting (on by default) to switch off the labels that explain each
+  button. In ⚙ Settings on every page and as `/review-doc:settings set tooltips off`.
+
+### Changed
+- The page type is now a coloured pill in front of the title: MD orange, PLAN dark
+  red, CHOICE dark blue, and HTML light blue for when HTML pages arrive. Options
+  and explainer screens both say CHOICE.
+- The Request changes icon sits 2px higher, with 2px more space before its label.
+
+### Fixed
+- The page footer spells the author's name Muszyński, and the footer line is centred.
+- A plan page no longer drops a quote, list or code block that sits between the header
+  fields; it shows under the At a glance table. A list or code line under a field is no
+  longer glued onto that field.
+
 ## [1.0.0] - 2026-10-01
 
 First public release.
