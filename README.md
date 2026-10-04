@@ -1,6 +1,6 @@
 # review-doc
 
-Review Markdown documents and Claude's plans in your browser instead of the terminal.
+Review Markdown documents and Claude's plans in your browser or directly in VS Code instead of the terminal.
 Comment on any passage, rewrite text in place, approve or decline sections, then paste
 one block back to Claude.
 
