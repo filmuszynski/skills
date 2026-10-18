@@ -32,9 +32,9 @@ Then type `/reload-plugins` (or restart Claude Code).
 
 ## Window size
 
-The plugin reads the model from the session's transcript: models with `[1m]` or
-"1M context" count as 1,000,000 tokens, others as 200,000. A `/model` switch is picked
-up on the next prompt. To force a size, set `CLAUDE_CONTEXT_WINDOW` (in tokens) in the
+The plugin reads the model from the session's transcript: Claude 5 models and any
+model with `[1m]` or "1M context" count as 1,000,000 tokens, older models as 200,000.
+A `/model` switch is picked up on the next prompt. To force a size, set `CLAUDE_CONTEXT_WINDOW` (in tokens) in the
 environment Claude Code starts from.
 
 ## Troubleshooting

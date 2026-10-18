@@ -10,8 +10,9 @@ above the new usage can fire again. Fails soft: any error exits 0 with no output
 Window size comes from the session's transcript: Claude Code writes a model
 attachment at session start and after every /model switch, e.g. modelId
 "claude-opus-5-5[1m]", marketingName "Opus 5.5 (1M context)". The last one wins.
-Hook input carries no model, and the model id on assistant messages drops the [1m]
-suffix. CLAUDE_CONTEXT_WINDOW (tokens) overrides everything.
+Claude 5 models run with 1M even without the suffix ("claude-opus-5-5"); older ones
+need it. Hook input carries no model, and the model id on assistant messages drops the
+[1m] suffix. CLAUDE_CONTEXT_WINDOW (tokens) overrides everything.
 """
 import json
 import os
@@ -33,6 +34,7 @@ RESET = "\x1b[0m"
 TAIL_BYTES = 2 * 1024 * 1024
 MODEL_RE = re.compile(r'"attachment":\{"type":"model","identity":\{"modelId":"([^"]*)",'
                       r'"marketingName":"([^"]*)"')
+GENERATION_RE = re.compile(r"claude-(?:[a-z]+-)?(\d+)")  # opus-5-5 -> 5, 3-7-sonnet -> 3
 USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 
 
@@ -86,7 +88,10 @@ def window_from_model(text):
         pass
     if last is None:
         return 0
-    one_m = "[1m]" in last.group(1).lower() or re.search(r"1M context", last.group(2), re.I)
+    model_id = last.group(1).lower()
+    gen = GENERATION_RE.search(model_id)
+    one_m = ("[1m]" in model_id or re.search(r"1M context", last.group(2), re.I)
+             or (gen and int(gen.group(1)) >= 5))
     return 1000000 if one_m else 200000
 
 

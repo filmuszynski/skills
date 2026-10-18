@@ -40,7 +40,7 @@ class Box:
             "modelId": model_id, "marketingName": name}}})
 
     def plain_model(self):
-        self.model("claude-sonnet-5-5", "Sonnet 5.5")
+        self.model("claude-haiku-4-5-20251001", "Haiku 4.5")
 
     def usage(self, tokens, **flags):
         entry = {"type": "assistant", "message": {"usage": {
@@ -180,6 +180,27 @@ def test_plain_model_means_200k():
     b.plain_model()
     b.usage(70000)
     assert "Context at 35% (70k of 200k tokens)" in line(b.run())
+
+
+@test
+def test_claude_5_without_suffix_means_1m():
+    # Opus 5.5 runs with 1M even when the transcript says plain "claude-opus-5-5"
+    b = Box()
+    b.model("claude-opus-5-5", "Opus 5.5")
+    b.usage(116000)
+    assert b.run() is None, "12% of 1M, not 58% of 200k"
+    b.usage(350000)
+    assert "(350k of 1M tokens)" in line(b.run())
+
+
+@test
+def test_older_generations_stay_200k():
+    for model_id, name in (("claude-sonnet-4-5-20250929", "Sonnet 4.5"),
+                           ("claude-3-7-sonnet-20250219", "Claude 3.7 Sonnet")):
+        b = Box()
+        b.model(model_id, name)
+        b.usage(70000)
+        assert "of 200k" in line(b.run()), model_id
 
 
 @test

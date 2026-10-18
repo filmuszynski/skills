@@ -6,6 +6,14 @@ All notable changes to the context-warning plugin. The format follows
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-18
+
+### Fixed
+- Claude 5 models count as 1M even when the model id has no `[1m]` suffix. Claude Code
+  writes plain `claude-opus-5-5` after `/model` → Opus 5.5, and the plugin read that as
+  200k: a session at 116k tokens showed "58% of 200k" instead of staying quiet at 12%.
+  Older generations (Claude 4.x, 3.x) still need `[1m]` for 1M.
+
 ## [1.0.1] - 2026-10-01
 
 ### Changed
