@@ -1,11 +1,12 @@
 ---
 name: review-md
-description: Render Markdown documents, plans and choice screens as review pages, and apply the feedback to the Markdown source. Loaded by the review-doc skill for .md and .markdown files; also usable directly as /review-doc:review-md <file>. Covers document review, the automatic plan pages, anchored comments, and options or explainer screens for questions that need a picture.
+description: Render Markdown documents, plans and choice screens as review pages, and apply the feedback to the Markdown source. Loaded by the vet skill (/vet) for .md and .markdown files; not typed directly. Covers document review, the automatic plan pages, anchored comments, and options or explainer screens for questions that need a picture.
+user-invocable: false
 ---
 
 # review-md
 
-The Markdown half of review-doc. Load `review-doc:review-doc` too if it is not loaded:
+The Markdown half of review-doc. Load `review-doc:vet` too if it is not loaded:
 it holds the handover, the exit codes, the verdicts and the extension offer, and this
 skill does not repeat them.
 
@@ -26,7 +27,7 @@ draft) renders with the `doc` kind:
 <python> "<base>/../../presenter/build_screen.py" doc "<file.md>"
 ```
 
-Hand the page over as `review-doc:review-doc` describes. A document page differs from a
+Hand the page over as `review-doc:vet` describes. A document page differs from a
 plan page in a few ways:
 
 - **Two buttons, not three:** Approve and Request changes. A draft has no approach to

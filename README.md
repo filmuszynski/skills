@@ -53,11 +53,12 @@ pages open in your normal browser.
 Ask Claude to review a document:
 
 ```
-/review-doc notes.md
+/vet notes.md
 ```
 
-or just say "let me review notes.md in the browser". If another skill is also called
-`review-doc`, use the full name, `/review-doc:review-doc`. The page opens on its own and
+or just say "let me review notes.md in the browser". `/vet` is the one command to type;
+the plugin loads the right part for the file on its own. If another skill is also called
+`vet`, use the full name, `/review-doc:vet`. The page opens on its own and
 Claude also gives you the link. Comment, rewrite, approve or decline, then press one of
 the buttons at the bottom and paste what it copied into Claude.
 

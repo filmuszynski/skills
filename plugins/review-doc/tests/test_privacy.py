@@ -78,7 +78,7 @@ def test_privacy_sees_every_committable_file():
     for must in ("README.md", "CHANGELOG.md", "LICENSE", ".gitignore",
                  "docs/adr/README.md", ".claude-plugin/marketplace.json",
                  "plugins/review-doc/.claude-plugin/plugin.json",
-                 "plugins/review-doc/skills/review-doc/SKILL.md"):
+                 "plugins/review-doc/skills/vet/SKILL.md"):
         assert must in files, must
     assert not any(p.startswith(("sessions/", ".impeccable/", "docs/specs/", "docs/plans/"))
                    for p in files), sorted(p for p in files if "/" in p)[:5]

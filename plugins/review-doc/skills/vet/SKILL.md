@@ -1,9 +1,9 @@
 ---
-name: review-doc
-description: Review a Markdown document or a plan in the browser instead of the terminal, and read the user's verdict back. Use when the user asks to review, mark up, comment on, proofread or approve a document ("review this", "let me mark this up", "show me that properly", "/review-doc"), when a review-doc hook has just handed you a plan link, when you finish a draft the user is meant to react to, and when the user pastes back feedback from a review page (a block that starts with Review of the plan, Review of the document, Answer to or Questions on).
+name: vet
+description: Review a Markdown document or a plan in the browser instead of the terminal, and read the user's verdict back. Use when the user asks to review, mark up, comment on, proofread or approve a document or page ("review this", "vet this", "let me mark this up", "show me that properly", "/vet"), when a review-doc hook has just handed you a plan link, when you finish a draft the user is meant to react to, and when the user pastes back feedback from a review page (a block that starts with Review of the plan, Review of the document, Answer to or Questions on).
 ---
 
-# review-doc
+# vet
 
 Terminal text cannot be marked up. A review page lets the user point at one sentence
 and comment on it, rewrite a line in place so you can adopt their wording, and approve

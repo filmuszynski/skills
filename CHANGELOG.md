@@ -6,6 +6,14 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-10-21
+
+### Changed
+- The command is now `/vet <file>`. The main skill is called `vet` (full name
+  `/review-doc:vet`) and picks the right part for the file itself. The plugin keeps its
+  name, so existing installs update as usual.
+- `review-md` no longer appears in the `/` menu. `/vet` loads it for Markdown files.
+
 ## [1.1.5] - 2026-10-01
 
 ### Added

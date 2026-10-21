@@ -50,7 +50,7 @@ def test_no_command_shadows_a_skill():
     assert not {c[:-3] for c in commands} & skills
 
 
-SKILLS = ("review-doc", "review-md")
+SKILLS = ("vet", "review-md")
 
 
 @test
@@ -77,8 +77,19 @@ def test_skills_find_the_renderer_from_their_base_directory():
 
 
 @test
+def test_vet_is_the_one_command_and_review_md_stays_out_of_the_menu():
+    meta, _ = front("skills", "vet", "SKILL.md")
+    assert "/vet" in meta["description"], meta
+    meta, body = front("skills", "review-md", "SKILL.md")
+    assert meta.get("user-invocable") in (False, "false"), meta
+    assert "/review-doc:review-md" not in meta["description"] + body
+    assert "review-doc:review-doc" not in body
+    assert not os.path.exists(os.path.join(PLUGIN, "skills", "review-doc"))
+
+
+@test
 def test_parent_skill_routes_and_handles_every_outcome():
-    _, body = front("skills", "review-doc", "SKILL.md")
+    _, body = front("skills", "vet", "SKILL.md")
     for needle in ("review-doc:review-md", ".markdown", ".html", "review-doc 1.2",
                    "exit 3", "exit 4", "/review-doc:settings set", "offerExtension",
                    "extension.py\" install", "extension.py\" decline",
@@ -97,7 +108,7 @@ def test_md_skill_covers_documents_plans_and_screens():
 
 @test
 def test_parent_skill_names_the_real_paste_back_headers():
-    meta, body = front("skills", "review-doc", "SKILL.md")
+    meta, body = front("skills", "vet", "SKILL.md")
     for start in ("Review of the plan", "Review of the document", "Answer to", "Questions on"):
         assert start in meta["description"], start
         assert start in body, start
@@ -120,6 +131,6 @@ def test_skills_and_command_never_hard_code_one_python():
 @test
 def test_parent_skill_runs_settings_show_itself():
     """M10: Claude cannot type a slash command; it runs the CLI."""
-    _, body = front("skills", "review-doc", "SKILL.md")
+    _, body = front("skills", "vet", "SKILL.md")
     assert 'settings.py" show' in body
     assert "run `/review-doc:settings show`" not in body
