@@ -125,6 +125,19 @@ def test_no_head_keeps_doctype_first():
 
 
 @test
+def test_head_in_comment_or_script_is_skipped():
+    page = "<!-- <head> --><html><head><title>x</title>"
+    assert frame_server.inject_probe(page, N) == page.replace("<html><head>", "<html><head>" + TAG, 1)
+    page = '<html><script>var s="<head>"</script><head><title>x</title>'
+    want = '<html><script>var s="<head>"</script><head>' + TAG + "<title>x</title>"
+    assert frame_server.inject_probe(page, N) == want
+    page = "<html><style>/* <head> */</style><HEAD><title>x</title>"
+    assert frame_server.inject_probe(page, N) == page.replace("<HEAD>", "<HEAD>" + TAG, 1)
+    page = '<!doctype html><html><script>var s="<head>"</script><body>x</body>'
+    assert frame_server.inject_probe(page, N) == "<!doctype html><html>" + TAG + page[len("<!doctype html><html>"):]
+
+
+@test
 def test_rewrite_html_keeps_the_encoding():
     text = "<head><title>Grüße</title></head>"
     out, ctype = frame_server.rewrite_html(text.encode("utf-8"), N)

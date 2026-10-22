@@ -2569,6 +2569,42 @@ def test_start_tag():
     assert out == ['<p class="lead" id="x">', 120, "…"], out
 
 
+@test
+def test_probe_listens_on_window_capture_first():
+    js = shell._asset("probe.js")
+    for ev in ("click", "submit", "keydown"):
+        assert re.search(r'window\.addEventListener\("%s", \w+, true\)' % ev, js), ev
+    assert "stopImmediatePropagation()" in js
+    assert "requestAnimationFrame" not in js, "the automation tab is hidden and gets no rAF"
+
+
+@test
+def test_probe_checks_origins():
+    js = shell._asset("probe.js")
+    assert "Number(location.port) - 100" in js
+    for host in ('"http://127.0.0.1:"', '"http://localhost:"', '"http://[::1]:"'):
+        assert host in js, host
+    on = js_function("onMessage", "probe.js")
+    assert "if (ev.source !== window.parent) return;" in on
+    assert not re.search(r'postMessage\([^)]*"\*"', js), "never post to any origin"
+
+
+@test
+def test_probe_blocks_formatting():
+    bi = js_function("onBeforeInput", "probe.js")
+    for frag in ('"insertFromPaste"', '"insertText"', '"insertParagraph"', '"format"'):
+        assert frag in bi, frag
+    assert 'window.addEventListener("beforeinput", onBeforeInput, true)' in shell._asset("probe.js")
+
+
+@test
+def test_probe_layer_is_closed_and_on_top():
+    js = shell._asset("probe.js")
+    lay = js_function("layer", "probe.js")
+    for frag in ('attachShadow({mode: "closed"})', "2147483647", "pointer-events", "review-doc-layer"):
+        assert frag in lay, frag
+
+
 def main():
     for mod in NEW_TEST_MODULES:
         __import__(mod)

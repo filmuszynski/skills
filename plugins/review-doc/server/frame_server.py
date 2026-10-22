@@ -122,6 +122,10 @@ def rewrite_meta_csp(text, nonce):
 # ------------------------------------------------------------------ the probe tag
 
 _HEAD_RE = re.compile(r"<head(?=[\s>/])[^>]*>", re.I)
+# Spans whose text is not markup. An unclosed one runs to the end of the file.
+_OPAQUE_RE = re.compile(r"<!--.*?(?:-->|\Z)"
+                        r"|<script(?=[\s>/])[^>]*>.*?(?:</script\s*>|\Z)"
+                        r"|<style(?=[\s>/])[^>]*>.*?(?:</style\s*>|\Z)", re.I | re.S)
 # What may come before the probe when there is no <head>: a BOM, comments, the
 # doctype and the <html> start tag. A script before the doctype means quirks mode.
 _LEAD_RE = re.compile(r"\A\ufeff?(?:\s*(?:<!--.*?-->\s*)*<!doctype[^>]*>)?"
@@ -132,10 +136,20 @@ def probe_tag(nonce):
     return '<script src="%s" nonce="%s"></script>' % (PROBE_PATH, nonce)
 
 
+def _first_real_head(text):
+    """The first <head> start tag that is markup, not text inside a comment, a
+    script or a style (a page may well write "<head>" in a string)."""
+    hidden = [s.span() for s in _OPAQUE_RE.finditer(text)]
+    for m in _HEAD_RE.finditer(text):
+        if not any(a <= m.start() < b for a, b in hidden):
+            return m
+    return None
+
+
 def inject_probe(text, nonce):
     """The probe tag right after <head>, or after the doctype and <html> without one."""
     tag = probe_tag(nonce)
-    m = _HEAD_RE.search(text)
+    m = _first_real_head(text)
     cut = m.end() if m else _LEAD_RE.match(text).end()
     return text[:cut] + tag + text[cut:]
 
