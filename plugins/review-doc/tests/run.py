@@ -2598,6 +2598,13 @@ def test_probe_blocks_formatting():
 
 
 @test
+def test_probe_keeps_top_and_parent_links_in_the_frame():
+    fo = js_function("followOut", "probe.js")
+    assert '"_top"' in fo and '"_parent"' in fo
+    assert "location.href = a.href" in fo
+
+
+@test
 def test_probe_layer_is_closed_and_on_top():
     js = shell._asset("probe.js")
     lay = js_function("layer", "probe.js")

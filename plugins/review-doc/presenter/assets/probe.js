@@ -298,6 +298,7 @@
   var stops = [];           /* [{key, kind, id, n, first, pieces, caret}] in document order */
   var boxes = [];           /* what the last redraw drew, for hit-testing */
   var drawnOnce = false;
+  var lastDraw = null;      /* the last draw message, re-run when an edit round posts nothing */
   var openId = null;
   var pulseKey = null, pulseTimer = null;
   var redrawTimer = null;
@@ -346,6 +347,7 @@
 
   function setMode(m) {
     if (m !== "use" && m !== "comment" && m !== "edit") return;
+    if (m === mode) return;   /* a repeat must not end an edit in progress */
     if (editing) commit();
     mode = m;
     if (drawnOnce) redraw();
@@ -619,6 +621,7 @@
   }
 
   function onDraw(msg) {
+    lastDraw = msg;
     var marks = msg.marks || [], edits = msg.edits || [], i, next = [];
     var found = applyEdits(edits);
     for (i = 0; i < marks.length; i++) {
@@ -751,12 +754,21 @@
     return el;
   }
 
+  /* Typing, or restoring startHTML, replaces the text nodes the stops' live
+     ranges point at, so they collapse. When no edit is posted, no draw will
+     follow; rebuild the stops from the last one ourselves. */
+  function drawAgain() {
+    if (lastDraw) onDraw(lastDraw);
+  }
+
   function commit() {
     if (!editing) return;
     var el = stopEditing();
     var neu = flatText(el).text, alt = origFlat(el).text;
-    if (neu === startText) return;              /* nothing changed in this round */
-    if (!el.__rdEdit && neu === alt) return;
+    if (neu === startText || (!el.__rdEdit && neu === alt)) {
+      drawAgain();                              /* nothing to post in this round */
+      return;
+    }
     var sel = selectorFor(el);
     if (!el.__rdEdit) {
       pending = el;
@@ -771,6 +783,7 @@
     var el = editing;
     el.innerHTML = startHTML;
     stopEditing();
+    drawAgain();
   }
 
   function editClick(ev) {
@@ -792,7 +805,7 @@
       return;
     }
     if (t.indexOf("format") === 0 || t === "insertParagraph" || t === "insertLineBreak" ||
-        t === "insertFromDrop") {
+        t === "insertFromDrop" || t === "deleteByDrag") {
       ev.preventDefault();
     }
   }
@@ -819,7 +832,15 @@
       return;
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") return;
-    if (url.origin === location.origin) return;
+    if (url.origin === location.origin) {
+      /* _top or _parent would take the review shell itself away; keep it in the frame. */
+      var tgt = String(a.getAttribute("target") || "").toLowerCase();
+      if (tgt === "_top" || tgt === "_parent") {
+        ev.preventDefault();
+        location.href = a.href;
+      }
+      return;
+    }
     ev.preventDefault();
     window.open(url.href, "_blank", "noopener");
   }
@@ -864,8 +885,8 @@
     if (ev.type !== "keydown") return;
     var k = String(ev.key || "").toLowerCase();
     if ((ev.ctrlKey || ev.metaKey) && (k === "z" || k === "y")) {
-      /* The page's own form fields keep their native undo in Use mode. */
-      if (mode === "use" && typingInPageField(ev.target)) return;
+      /* The page's own form fields keep their native undo, in every mode. */
+      if (typingInPageField(ev.target)) return;
       ev.preventDefault();
       post("key", {key: k, shift: !!ev.shiftKey});
     } else if (ev.key === "Escape") {
