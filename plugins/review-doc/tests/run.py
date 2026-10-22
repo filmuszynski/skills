@@ -1962,6 +1962,45 @@ def test_css_only_rerender_promotes():
 
 
 @test
+def test_css_only_rerender_settles_and_reloads():
+    """settleStep fed with what /api/review-source answers around a CSS-only fix."""
+    import build_screen, pages, time
+    from serverkit import serving, request, frame_request
+    h = use_home(new_home())
+    root = os.path.join(h, "site")
+    os.makedirs(root)
+    entry, css = os.path.join(root, "index.html"), os.path.join(root, "a.css")
+    io.open(entry, "w", encoding="utf-8").write(
+        '<!DOCTYPE html><html><head><title>t</title><link rel="stylesheet" href="a.css"></head>'
+        "<body>x</body></html>")
+    io.open(css, "w", encoding="utf-8").write("p{}")
+    res = build_screen.build("html", entry)
+    page, slug = res["path"], pages.read_meta(res["path"])["slug"]
+    built = pages.read_meta(page)["sourceMtime"]
+    loaded = int(os.path.getmtime(page) * 1000) + 1   # the shell loads after its page is written
+    polls = []
+    with serving(h) as srv:
+        def source():
+            status, _, data = request(srv, "GET", "/api/review-source?slug=" + slug)
+            assert status == 200, status
+            got = json.loads(data.decode("utf-8"))
+            polls.append([got["mtime"], got["page"]])
+        frame_request(srv, "GET", "/", slug)
+        frame_request(srv, "GET", "/a.css", slug)
+        source()                       # nothing changed yet
+        time.sleep(1.1)
+        os.utime(css, None)            # Claude fixes only the stylesheet
+        source()
+        source()
+        time.sleep(0.05)
+        build_screen.build("html", entry)   # ... and renders again
+        source()
+        source()
+    out = _settle(polls, built=built, loaded=loaded)
+    assert out == [False, False, False, False, True], (polls, built, loaded, out)
+
+
+@test
 def test_promote_moves_the_pending_round_on_a_newer_build():
     out = run_js(["promoteRound"], """(function () {
       var d = {marks: {m1: {sec: "s", quote: "q", comment: "c"}}, edits: {e1: {sec: "s", alt: "a", neu: "b"}},
@@ -2718,6 +2757,50 @@ def test_pull_end_back_on_triple_click():
 
 
 @test
+def test_pull_end_back_keeps_a_multi_paragraph_drag():
+    # A drag over p1 and p2 released at the start of p3 (or Shift+Down twice)
+    # covers p1 and p2; the blank text between the blocks does not count.
+    pre = ('var t1 = textNode("First para."), t2 = textNode("Second para."), t3 = textNode("Third.");'
+           'var p1 = el("p", [t1]), p2 = el("p", [t2]), p3 = el("p", [t3]);'
+           'var body = el("body", [p1, textNode("\\n  "), p2, textNode("\\n  "), p3]);'
+           'function rng(sc, so, ec, eo) { var r = {startContainer: sc, startOffset: so, endContainer: ec,'
+           ' endOffset: eo}; r.setEnd = function (n, o) { r.endContainer = n; r.endOffset = o; }; return r; }'
+           'var r1 = rng(t1, 0, t3, 0), r2 = rng(t1, 0, p3, 0), r3 = rng(t1, 0, t2, 0);')
+    out = run_lookup("(pullEndBack(r1), pullEndBack(r2), pullEndBack(r3), "
+                     "[r1.endContainer === t2, r1.endOffset, r2.endContainer === t2, r2.endOffset,"
+                     " r3.endContainer === t1, r3.endOffset])", pre)
+    assert out == [True, 12, True, 12, True, 11], out
+
+
+@test
+def test_find_mark_start_check_accepts_the_live_text():
+    # The comment was made after the reviewer rewrote the start: its stored text
+    # is the live text, not the original.
+    pre = ('var p1 = el("p", ["Brand new start. Keep these words."]);'
+           'var body = el("body", [p1]); var orig = new Map();'
+           'orig.set(p1, flatText(el("p", ["Old opening here. Keep these words."])));'
+           'var e = mkEnv({sel: {"p": p1}, all: [p1], body: body, orig: orig});'
+           'var mk = {sel: "p", tag: "<p>", text: "Brand new start. Keep these words.", quote: "Keep these",'
+           ' occ: 0};')
+    out = run_lookup("(r = findMark(mk, e), [r.el === p1, r.at, r.step])", pre + "var r;")
+    assert out == [True, 17, 1], out
+
+
+@test
+def test_edit_host_skips_a_claimed_id_in_use():
+    # a is tied to rewrite B but was already claimed by rewrite A through the
+    # stored selector: B goes on to its own selector instead of taking a twice.
+    pre = ('var a = el("p", ["Same text."]), b2 = el("p", ["Same text."]);'
+           'var body = el("body", [a, b2]);'
+           'var e = mkEnv({sel: {"p": a, "p:nth-of-type(2)": b2}, all: [a, b2], body: body, ids: {B: a}});'
+           'var cl = {};')
+    out = run_lookup("(r1 = findEdit({id: 'A', sel: 'p', tag: '<p>', alt: 'Same text.', neu: 'New.'}, e, cl), "
+                     "r2 = findEdit({id: 'B', sel: 'p:nth-of-type(2)', tag: '<p>', alt: 'Same text.', neu: 'Other.'}, e, cl), "
+                     "[r1.el === a, r2.el === b2, r2.step])", pre + "var r1, r2;")
+    assert out == [True, True, 1], out
+
+
+@test
 def test_probe_draw_reports_found():
     od = js_function("onDraw", asset="probe.js")
     assert "found" in od and "earlier" in od, od
@@ -2894,6 +2977,7 @@ var b;
                      ("isNum", SH), ("own", SH), ("cleanRect", SH), ("cleanAnchor", SH),
                      ("newEditId", SH), ("isEarlierKey", SH), ("tagNameOf", SH), ("neuOffsets", SH),
                      ("pillLabel", SH), ("squeeze", "shell.js"), ("runOffsets", "shell.js"),
+                     ("truncate", SH), ("firstStopOrder", SH), ("htmlAnswerLines", SH),
                      ("createBackend", SH)]
     return run_js(fns, "(function () { b = createBackend(host, env); %s })()" % expr, pre)
 
@@ -3371,6 +3455,44 @@ return [cur, prev, all, lostShown, b.backend.stops("all")];""", data)
                       [{"key": "r0:e:q", "label": "Earlier rewrite in h2", "earlier": True}]], out[1]
     assert out[2] == [["m:a", "r0:m:p", "lost:m:c", "lost:r0:e:q"], ["m:c", "r0:e:q"]], out[2]
     assert out[3] == [] and out[4] == [], "away from the page the strip is hidden"
+
+
+@test
+def test_backend_found_items_without_a_stop_get_a_pill():
+    # An adopted pure-deletion rewrite has no runs to draw, so the probe reports
+    # it found with no stop; an earlier item can end up the same way.
+    data = dict(LOST_DATA, rounds=[{"marks": {}, "edits": {"q": {"sec": "", "alt": "u v", "neu": "u w",
+                                                                 "sel": "h2", "tag": "<h2>", "text": "u v"}}}])
+    out = _backend_run(HELLO + """
+scope = "all";
+b.receive({rd: 1, type: "drawn", stops: [{key: "m:a", kind: "comment"}], rects: {},
+           found: {"m:a": {step: 1, sel: "p"}, "m:b": {step: 2, sel: "p"}, "e:x": {step: 1, sel: "p", adopted: true},
+                   "r0:e:q": {step: 2, sel: "h2"}}});
+var lines = b.backend.answerLines();
+return [b.backend.stops("all"), lostShown.map(function (p) { return p.key; }), driftMap,
+        lines.filter(function (l) { return l.indexOf("changed since") !== -1; }).length,
+        lines.filter(function (l) { return l.indexOf("(already in the page)") !== -1; }).length];""", data)
+    assert out[0] == ["m:a", "lost:m:b", "lost:e:x", "lost:r0:e:q"], out[0]
+    assert out[1] == ["m:b", "e:x", "r0:e:q"], out[1]
+    assert out[2] == {"b": "moved"}, "no gone drift for a found item"
+    assert out[3] == 0 and out[4] == 1, out
+
+
+@test
+def test_backend_answer_keeps_the_last_found_while_away():
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [{key: "e:x:0", kind: "edit"}], rects: {},
+           found: {"m:c": {step: 0, sel: "h1"}, "e:x": {step: 1, sel: "#lead", adopted: true}}});
+var before = b.backend.answerLines();
+b.receive({rd: 1, type: "hello", path: "/about.html", title: "A"});
+var away = b.backend.answerLines();
+b.receive({rd: 1, type: "bye"});
+var bye = b.backend.answerLines();
+return [before, away, bye, lostShown];""", LOST_DATA)
+    assert out[0][0] == "1. Rewrite in <p>  (#lead) (already in the page)", out[0]
+    assert any("(the element has changed since)" in l for l in out[0]), out[0]
+    assert out[1] == out[0] and out[2] == out[0], out
+    assert out[3] == [], "the strip stays hidden while away"
 
 
 @test

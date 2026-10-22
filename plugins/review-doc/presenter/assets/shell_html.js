@@ -218,8 +218,10 @@
     var chosen = host.state.mode || "use";
     var up = false, onEntry = false, due = true, opened = false, asking = false;
     var stops = [], rects = Object.create(null), helloTimer = null;
-    /* The last drawn's lookup step per item key, and the item keys at step 0. */
-    var found = Object.create(null), lost = [];
+    /* The last drawn's lookup step per item key, and the item keys the strip
+       shows. `found` and `order` (the item keys in stop order) feed the answer
+       and are kept while the frame is away: only the next drawn replaces them. */
+    var found = Object.create(null), lost = [], order = [];
     var later = env.later || function (fn, ms) { return setTimeout(fn, ms); };
     var cancel = env.cancel || function (h) { clearTimeout(h); };
 
@@ -358,9 +360,17 @@
     function forget() {
       stops = [];
       rects = Object.create(null);
-      found = Object.create(null);
       lost = [];
       renderLost();
+    }
+
+    /* Does the probe have a stop for this item key? A current rewrite's stops
+       are e:<id>:<n>; every other item has one stop under its own key. */
+    function hasStop(list, key) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].key === key || list[i].key.indexOf(key + ":") === 0) return true;
+      }
+      return false;
     }
 
     /* A bubble that lit a comment in the frame lets it go when it closes. */
@@ -483,7 +493,10 @@
 
     /* Only well-formed stops are kept, and `found` only for items the state
        holds. Decision 5 sets each current comment's drift; an item at step 0 is
-       lost, and gets a pill and a stop after the probe's stops. */
+       lost, and gets a pill and a stop after the probe's stops. So does an item
+       found with no stop (an adopted rewrite that only deletes has no runs to
+       draw), or nothing on the page would reach it; it keeps its drift and its
+       answer line. */
     function onDrawn(m) {
       if (!Array.isArray(m.stops)) return;
       var list = [], i, fm = m.found && typeof m.found === "object" ? m.found : {};
@@ -497,7 +510,7 @@
         var f = Object.prototype.hasOwnProperty.call(fm, keys[i]) ? fm[keys[i]] : null;
         if (!f || typeof f !== "object" || [0, 1, 2, 3].indexOf(f.step) === -1 || !itemOf(keys[i])) continue;
         fd[keys[i]] = {step: f.step, sel: isStr(f.sel) ? f.sel : "", adopted: f.adopted === true};
-        if (f.step === 0) gone.push(keys[i]);
+        if (f.step === 0 || !hasStop(list, keys[i])) gone.push(keys[i]);
         if (keys[i].indexOf("m:") === 0) {
           var id = keys[i].slice(2);
           if (f.step === 1) delete drift[id];
@@ -508,6 +521,7 @@
       stops = list;
       rects = keepRects(m.rects && typeof m.rects === "object" ? m.rects : {});
       found = fd;
+      order = firstStopOrder(list);
       lost = gone;
       renderLost();
       /* updatePrompt runs updateCounters, so the counters wake up as soon as
@@ -636,7 +650,7 @@
       /* shell.js's buildPrompt uses these lines instead of the md ones. */
       answerLines: function () {
         var d = host.state.data;
-        return htmlAnswerLines(d, found, firstStopOrder(stops), d.general);
+        return htmlAnswerLines(d, found, order, d.general);
       },
       isEarlier: isEarlierKey,
       /* shell.js's onScope calls this: the pills follow the counters' scope. */

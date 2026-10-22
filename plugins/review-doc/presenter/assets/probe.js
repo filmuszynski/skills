@@ -375,7 +375,9 @@
     function check(el) {
       if (!el) return null;
       var live = env.flatOf(el), orig = env.origOf ? env.origOf(el) : null;
-      if (!startMatches(mk.text, (orig || live).text)) return null;
+      /* The stored text is the live text when the comment was made, which may
+         already carry the reviewer's own rewrite: either reading passes. */
+      if (!startMatches(mk.text, live.text) && !(orig && startMatches(mk.text, orig.text))) return null;
       if (live.text.indexOf(quote) === -1) return null;
       var at = nthIndex(live.text, quote, mk.occ || 0);
       return at === -1 ? live.text.indexOf(quote) : at;
@@ -426,7 +428,7 @@
     var el = null, hit, i;
     if (env.idInUse && ed.id !== undefined) {
       el = env.idInUse(ed.id);
-      if (el && (hit = test(el)) !== -1) return take(el, 1, hit);
+      if (el && !claimed[prefix + env.keyOf(el)] && (hit = test(el)) !== -1) return take(el, 1, hit);
     }
     el = env.bySel(ed.sel);
     if (el && !claimed[prefix + env.keyOf(el)] && (hit = test(el)) !== -1) return take(el, 1, hit);
@@ -454,27 +456,44 @@
     return h ? {el: h.el, step: h.step} : null;
   }
 
-  /* A triple click ends at offset 0 of the next block. Pull the end back to the
-     end of the last text of the block the selection started in, so the passage
-     anchor is that block and not the common parent. */
+  /* A triple click ends at offset 0 of the next block, and so does a drag over
+     several blocks released at the start of the one after. Pull the end back to
+     the end of the last text before the end point in document order: a triple
+     click then ends in its own block, so the passage anchor is that block and
+     not the common parent, and a drag keeps every block it covered (ruling 11).
+     Blank text between blocks does not count; it would put the end back into
+     the common parent. */
   function pullEndBack(range) {
     if (range.endOffset !== 0) return;
     var block = passageAnchor(range.startContainer);
     if (!block || inside(range.endContainer, block)) return;
+    function filled(k) { return /\S/.test(String(k.nodeValue)); }
     function lastText(n) {
+      if (n.nodeType === 3) return filled(n) ? n : null;
+      if (n.nodeType !== 1 || SKIP[tagOf(n)]) return null;
       var kids = n.childNodes || [], i, t;
       for (i = kids.length - 1; i >= 0; i--) {
-        var k = kids[i];
-        if (k.nodeType === 3) {
-          if (String(k.nodeValue).length) return k;
-        } else if (k.nodeType === 1 && !SKIP[tagOf(k)]) {
-          t = lastText(k);
-          if (t) return t;
-        }
+        t = lastText(kids[i]);
+        if (t) return t;
       }
       return null;
     }
-    var t = lastText(block);
+    function prevSibling(n) {
+      var kids = n.parentNode ? n.parentNode.childNodes : [], i;
+      for (i = 1; i < kids.length; i++) if (kids[i] === n) return kids[i - 1];
+      return null;
+    }
+    var n = range.endContainer, t = null, p;
+    while (n && !t) {
+      p = prevSibling(n);
+      while (!p && n.parentNode) {
+        n = n.parentNode;
+        p = prevSibling(n);
+      }
+      if (!p) break;
+      t = lastText(p);
+      n = p;
+    }
     if (t) range.setEnd(t, String(t.nodeValue).length);
   }
 
