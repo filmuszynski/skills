@@ -683,10 +683,23 @@
   var origin = originOf(src);
   var current = null, frameLoaded = false;
 
+  /* A message is the frame's when it comes from the frame's window on the
+     frame's origin. A document that is navigating away posts its last edit and
+     its bye in pagehide (decision 12), and Chrome delivers those with source
+     null: the window that sent them is gone by then. The origin is the
+     reviewed page's own, so taking exactly those two types from a gone window
+     lets in nothing a page script in the frame could not already post. */
+  function fromFrame(ev, win, origin) {
+    if (ev.origin !== origin) return false;
+    if (ev.source === win) return true;
+    var d = ev.data;
+    return ev.source === null && !!d && typeof d === "object" &&
+      (d.type === "edit" || d.type === "bye");
+  }
+
   function onFrameMessage(ev) {
     if (!current || !frame) return;
-    if (ev.source !== frame.contentWindow) return;
-    if (ev.origin !== origin) return;
+    if (!fromFrame(ev, frame.contentWindow, origin)) return;
     current.receive(ev.data);
   }
 

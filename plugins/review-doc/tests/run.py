@@ -2911,13 +2911,33 @@ def test_html_backend_checks_origin():
     js = shell._asset(SH)
     on = js_function("onFrameMessage", SH)
     hand = on.index("receive(ev.data)")
-    assert on.index("ev.source !== frame.contentWindow") < hand, on
-    assert on.index("ev.origin !== origin") < hand, on
-    assert ".type" not in on[:hand], "nothing is read before both checks"
+    assert on.index("fromFrame(ev, frame.contentWindow, origin)") < hand, on
+    ff = js_function("fromFrame", SH)
+    assert ff.index("ev.origin !== origin") < ff.index("ev.source"), "origin first"
+    assert ff.index("ev.origin !== origin") < ff.index(".type"), "nothing is read before the origin"
     rec = js_function("createBackend", SH)
     assert rec.index("m.rd !== 1") < rec.index("var t = m.type"), "rd checked before the type"
     assert not re.search(r'postMessage\([^)]*"\*"', js), "never post to any origin"
     assert "postMessage(m, origin)" in js
+
+
+@test
+def test_from_frame_takes_the_pagehide_pair_from_a_gone_window():
+    """Chrome delivers what a navigating document posts in pagehide with source
+    null (seen in Task 6 of Phase 4): the last edit and bye must still count
+    (decision 12), and nothing else may pass without the frame's window."""
+    o = "http://s.localhost:27890"
+    out = run_js([("fromFrame", SH)], """[
+      fromFrame({origin: O, source: W, data: {rd: 1, type: "select"}}, W, O),
+      fromFrame({origin: O, source: null, data: {rd: 1, type: "edit"}}, W, O),
+      fromFrame({origin: O, source: null, data: {rd: 1, type: "bye"}}, W, O),
+      fromFrame({origin: O, source: null, data: {rd: 1, type: "select"}}, W, O),
+      fromFrame({origin: O, source: null, data: null}, W, O),
+      fromFrame({origin: O, source: {}, data: {rd: 1, type: "edit"}}, W, O),
+      fromFrame({origin: "http://evil", source: null, data: {rd: 1, type: "edit"}}, W, O),
+      fromFrame({origin: "http://evil", source: W, data: {rd: 1, type: "bye"}}, W, O)
+    ]""", "var W = {}; var O = %s;" % json.dumps(o))
+    assert out == [True, True, True, False, False, False, False, False], out
 
 
 @test
