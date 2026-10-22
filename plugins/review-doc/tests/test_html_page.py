@@ -126,6 +126,7 @@ def test_doc_page_render_is_unchanged_by_the_single_pass():
     meta = built["meta"]
     kind = meta.get("kind", "document")
     old = shell.PAGE
+    old = old.replace("__MODES__", shell._modes_html(("comment", "edit")))
     old = old.replace("__CREDIT__", shell._credit_html(meta.get("version")))
     old = old.replace("__CSS__", shell._asset("shell.css"))
     data = {"sections": list(built["sections"]),
@@ -345,3 +346,28 @@ def test_html_switch_off_refuses_with_exit_3():
     settings.set_value("html", "off", h)
     code, res = _main_json(["html", _copy_single(h)])
     assert code == 3 and res == {"ok": False, "reason": "disabled", "setting": "html"}, res
+
+
+@test
+def test_html_page_has_three_modes():
+    import re
+    built = layout_html.build(fixture("site_single.html"), source="/x/site_single.html", slug="x-site-single-1a2b3c")
+    assert built["modes"] == ("use", "comment", "edit")
+    html = shell.render(**built)
+    assert 'class="modes three"' in html
+    group = html[html.index('<div class="modes'):html.index('<div class="history">')]
+    assert re.findall(r'data-mode="(\w+)"', group) == ["use", "comment", "edit"]
+    for tip in ("Use the page as a visitor would: links, menus and forms work",
+                "Select any text to comment on it",
+                "Click a piece of text and rewrite it in place"):
+        assert 'data-tip="%s"' % tip in group, tip
+    assert ('<div class="html-stage"><div class="html-away" id="html-away" hidden><span></span>'
+            '<button type="button" class="btn small" id="html-back"></button></div>') in html
+
+
+@test
+def test_frame_has_no_sandbox_or_allow():
+    import re
+    built = layout_html.build(fixture("site_single.html"), source="/x/site_single.html", slug="x-site-single-1a2b3c")
+    tag = re.search(r"<iframe\b[^>]*>", built["body_html"]).group(0)
+    assert "sandbox" not in tag and "allow=" not in tag, tag

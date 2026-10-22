@@ -1742,7 +1742,7 @@ def test_header_buttons_one_height_and_mode_plate_slides():
         "the label sits 1px higher"
     assert '.modes button[aria-pressed="true"] { color: #2a1608; font-weight: 600; }' in css, \
         "the pressed half no longer paints its own background"
-    html = io.open(os.path.join(PRESENTER, "shell.py"), encoding="utf-8").read()
+    html = shell.render(**layout_doc.build("# T\n\n## A\n\nx\n", source="/x/n.md", slug="n"))
     assert 'data-mode="comment" data-label="Comment"' in html
     assert 'data-mode="edit" data-label="Edit text"' in html
 
@@ -2371,6 +2371,52 @@ def test_one_earlier_edit_in_two_pieces_is_one_stop():
                  "[navTargets('edits').length, (scope = 'all', navTargets('edits').length),"
                  " (scope = 'current', navTargets('edits').length)]", pre)
     assert out == [2, 3, 1], out
+
+
+@test
+def test_md_modes_unchanged():
+    built = layout_doc.build("# T\n\n## A\n\nx\n", source="/x/n.md", slug="n")
+    html = shell.render(**built)
+    group = html[html.index('<div class="modes"'):html.index('<div class="history">')]
+    assert group.count("<button") == 2 and 'class="modes three"' not in html
+    assert 'data-tip="Select any passage to comment on it"' in group
+    assert 'data-tip="Click into the text and rewrite it in place"' in group
+
+
+@test
+def test_three_mode_plate_css():
+    css = shell._asset("shell.css")
+    for rule in (".modes.three { grid-template-columns: 1fr 1fr 1fr; }",
+                 ".modes.three::before { width: 33.334%; }",
+                 "body.mode-comment .modes.three::before { transform: translateX(100%); }",
+                 "body.mode-edit .modes.three::before { transform: translateX(200%); }",
+                 "body.mode-edit .modes::before { transform: translateX(100%); }",
+                 ".modes button:disabled { opacity: .45; cursor: default; }"):
+        assert rule in css, rule
+
+
+@test
+def test_set_mode_tells_the_backend():
+    src = js_function("setMode")
+    assert "mode-use" in src and "backend.mode" in src
+
+
+@test
+def test_change_bubble_shared():
+    assert "changeBubble(" in js_function("showEdit") and "openBubble(" not in js_function("showEdit")
+    cb = js_function("changeBubble")
+    assert '"Now"' in cb and "bubble-diff old" in cb
+
+
+@test
+def test_host_runs_match_counter():
+    pre = "var BRIDGE_WORDS = 2, BRIDGE_CHARS = 24, DIFF_CELLS = 250000;"
+    out = run_js(["tokenize", "diffTokens", "isBridge", "buildRuns", "coalesceRuns"],
+                 'coalesceRuns(buildRuns(diffTokens(tokenize("one stage earlier"), tokenize("a whole stage sooner")))).filter(function (r) { return !r.same; }).length', pre)
+    assert out == 1, out
+    st = js_function("start")
+    for frag in ("runs:", "showChange: changeBubble", "undo: undo", "redo: redo"):
+        assert frag in st, frag
 
 
 def main():

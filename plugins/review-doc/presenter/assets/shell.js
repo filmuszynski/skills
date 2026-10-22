@@ -165,7 +165,9 @@
         if (!Array.isArray(state.data.rounds)) state.data.rounds = [];
         if (!state.data.pending || typeof state.data.pending !== "object") state.data.pending = null;
       }
-      if (got && got.mode) state.mode = got.mode;
+      /* Only a mode this page offers: a stored "use" on an md page would leave
+         no button pressed. */
+      if (got && got.mode && doc.querySelector('.modes button[data-mode="' + got.mode + '"]')) state.mode = got.mode;
       if (got && got.ui) {
         state.ui.head = got.ui.head !== false;
         /* The prompt is not restored: every page opens with it hidden, and the
@@ -2152,8 +2154,18 @@
     var was = isRun ? (anchorEl.getAttribute("data-was") || "") : entry.alt;
     var now = isRun ? anchorEl.textContent : entry.neu;
 
-    openBubble((anchorEl || el).getBoundingClientRect(), function (b) {
-      b.appendChild(mkEl("p", "bubble-head", isRun ? "This change" : "Before your rewrite"));
+    changeBubble((anchorEl || el).getBoundingClientRect(), was, now,
+                 isRun ? "This change" : "Before your rewrite",
+                 isRun ? "Revert this" : "Revert all", function () {
+      if (isRun) revertRun(el, anchorEl); else revertAll(id);
+    });
+  }
+
+  /* The bubble that shows what a rewrite changed, shared with the frame
+     backend through host.showChange. onRevert runs before the bubble closes. */
+  function changeBubble(rect, was, now, head, revertLabel, onRevert) {
+    openBubble(rect, function (b) {
+      b.appendChild(mkEl("p", "bubble-head", head));
       if (was.trim()) {
         b.appendChild(mkEl("p", "bubble-diff old", was));
       } else {
@@ -2166,8 +2178,8 @@
         b.appendChild(mkEl("p", "bubble-diff none", "Removed"));
       }
       var row = actionsRow();
-      row.appendChild(mkBtn(isRun ? "Revert this" : "Revert all", "btn small danger", function () {
-        if (isRun) revertRun(el, anchorEl); else revertAll(id);
+      row.appendChild(mkBtn(revertLabel, "btn small danger", function () {
+        onRevert();
         closeBubble();
       }));
       b.appendChild(row);
@@ -3532,6 +3544,7 @@
   function setMode(mode) {
     state.mode = mode;
     closeBubble();
+    doc.body.classList.toggle("mode-use", mode === "use");
     doc.body.classList.toggle("mode-edit", mode === "edit");
     doc.body.classList.toggle("mode-comment", mode === "comment");
     var els = docEl.querySelectorAll("[data-edit-id]");
@@ -3551,6 +3564,7 @@
     }
     if (mode !== "edit") hideTableBar();
     persist();
+    if (backend.mode) backend.mode(mode);
   }
 
   function applyPromptVisibility() {
@@ -3723,7 +3737,16 @@
       showEarlier: earlierBubble,
       closeBubble: closeBubble,
       save: save,
-      updatePrompt: updatePrompt
+      updatePrompt: updatePrompt,
+      undo: undo,
+      redo: redo,
+      showChange: changeBubble,
+      /* The rewrite's changed runs, the same ones the edits counter counts. */
+      runs: function (alt, neu) {
+        var ops = diffTokens(tokenize(alt), tokenize(neu));
+        return ops ? coalesceRuns(buildRuns(ops)) : null;
+      },
+      draw: applyDataToDoc
     };
     backend = pickBackend(window.REVIEW_DOC_BACKEND, host, mdBackend);
     collectEditables();

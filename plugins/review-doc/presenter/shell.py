@@ -4,7 +4,8 @@
 A layout produces five things and knows nothing about any of the above:
 
     shell.render(title, body_html, sections, prompt_spec, meta,
-                 actions=None, select=None, general_placeholder=None, scripts=None) -> str
+                 actions=None, select=None, general_placeholder=None, scripts=None,
+                 modes=None) -> str
 
     title         str   shown in the header and the browser tab
     body_html     str   the document itself, honouring the markup contract in shell.js
@@ -24,6 +25,8 @@ A layout produces five things and knows nothing about any of the above:
     general_placeholder str  what the free-text box invites
     scripts       list  extra asset names, each run in its own <script> block after
                         shell.js; only HTML pages have one (shell_html.js)
+    modes         tuple  which modes the switch offers; None is ("comment", "edit").
+                        HTML pages pass ("use", "comment", "edit")
 
 The result is one self-contained file: no external script, stylesheet or font.
 """
@@ -72,12 +75,7 @@ __CSS__
     <svg class="ico sc-previous" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6"/><circle cx="8" cy="8" r="5.6"/></svg>
     <svg class="ico sc-all" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.2" cy="8" r="4"/><circle cx="9.8" cy="8" r="4"/></svg>
   </button>
-  <div class="modes" role="group" aria-label="Review mode">
-    <button type="button" data-mode="comment" data-label="Comment" aria-pressed="true"
-            data-tip="Select any passage to comment on it">Comment</button>
-    <button type="button" data-mode="edit" data-label="Edit text" aria-pressed="false"
-            data-tip="Click into the text and rewrite it in place">Edit text</button>
-  </div>
+  __MODES__
   <div class="history">
     <button class="iconbtn" id="undo" type="button" data-tip="Undo (Ctrl+Z)" aria-label="Undo">&#8630;</button>
     <button class="iconbtn" id="redo" type="button" data-tip="Redo (Ctrl+Y)" aria-label="Redo">&#8631;</button>
@@ -149,7 +147,7 @@ __JS__
 """
 
 
-_PLACEHOLDER = re.compile(r"__(CREDIT|CSS|DATA|JS|BODY|ACTIONS|GENERAL|PILL|KIND|SHORT|TITLE)__")
+_PLACEHOLDER = re.compile(r"__(MODES|CREDIT|CSS|DATA|JS|BODY|ACTIONS|GENERAL|PILL|KIND|SHORT|TITLE)__")
 
 
 def _asset(name):
@@ -295,8 +293,30 @@ PILL_KIND = {"doc": "md", "html": "html", "plan": "plan",
              "options": "choice", "explain": "choice"}
 
 
+# The mode switch: label and tip per mode. The md tips are the first pair; an HTML
+# page, whose text sits in a frame, words the same two modes a little differently.
+MODE_LABEL = {"use": "Use", "comment": "Comment", "edit": "Edit text"}
+MD_TIPS = {"comment": "Select any passage to comment on it",
+           "edit": "Click into the text and rewrite it in place"}
+HTML_TIPS = {"use": "Use the page as a visitor would: links, menus and forms work",
+             "comment": "Select any text to comment on it",
+             "edit": "Click a piece of text and rewrite it in place"}
+
+
+def _modes_html(modes):
+    three = len(modes) == 3
+    tips = HTML_TIPS if three else MD_TIPS
+    out = ['<div class="modes%s" role="group" aria-label="Review mode">' % (" three" if three else "")]
+    for m in modes:
+        out.append('    <button type="button" data-mode="%s" data-label="%s" aria-pressed="%s"\n'
+                   '            data-tip="%s">%s</button>' % (
+                       m, MODE_LABEL[m], "true" if m == "comment" else "false", tips[m], MODE_LABEL[m]))
+    out.append("  </div>")
+    return "\n".join(out)
+
+
 def render(title, body_html, sections, prompt_spec, meta,
-           actions=None, select=None, general_placeholder=None, scripts=None):
+           actions=None, select=None, general_placeholder=None, scripts=None, modes=None):
     # None means "not supplied, use the default". An empty list means "this kind
     # has no verdict", which is not the same thing and must not fall back.
     actions = PLAN_ACTIONS if actions is None else list(actions)
@@ -321,6 +341,7 @@ def render(title, body_html, sections, prompt_spec, meta,
         js += "\n</script>\n<script>\n" + _asset(name)
     kind = meta.get("kind", "document")
     values = {
+        "MODES": _modes_html(modes or ("comment", "edit")),
         "CREDIT": _credit_html(meta.get("version")),
         "CSS": _asset("shell.css"),
         "DATA": _json_literal(data),

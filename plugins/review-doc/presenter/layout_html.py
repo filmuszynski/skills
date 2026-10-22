@@ -44,7 +44,8 @@ def build(raw, source, slug, generated_at="", target_path=None):
     served = (target_path or source).replace("\\", "/")
     root, entry = os.path.dirname(served), os.path.basename(served)
     title = page_title(raw, os.path.basename(source_disp))
-    body = ('<div class="html-stage"><iframe id="review-frame" title="%s" '
+    body = ('<div class="html-stage"><div class="html-away" id="html-away" hidden><span></span>'
+            '<button type="button" class="btn small" id="html-back"></button></div><iframe id="review-frame" title="%s" '
             'referrerpolicy="no-referrer"></iframe></div>' % shell._esc(title))
     footer = (
         "Apply the changes in %s, or in whatever generates it, then render its review "
@@ -70,4 +71,5 @@ def build(raw, source, slug, generated_at="", target_path=None):
         },
         "general_placeholder": "A note on the whole page, optional",
         "scripts": ["shell_html.js"],
+        "modes": ("use", "comment", "edit"),
     }
