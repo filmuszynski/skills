@@ -3438,8 +3438,75 @@ b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});
 b.receive({rd: 1, type: "edit", id: null, alt: "j k", neu: "j l", anchor: anchor});
 return [first, afterBye, Object.keys(state.data.edits).length];""")
     assert out == [1, 1, 1], out
-    sh = shell._asset(SH)
-    assert "EDIT_GRACE" not in sh and "leftEdit" not in sh
+
+
+@test
+def test_backend_edit_allowance_expires_and_is_used_by_a_rejected_edit():
+    def run(body):
+        return _backend_run(HELLO + """
+var clock = 1000;
+env.now = function () { return clock; };
+var anchor = {sel: "p", tag: "<p>", text: "a b"};
+b.backend.mode("edit");
+b.backend.mode("comment");
+%s
+return Object.keys(state.data.edits).length;""" % body)
+    ok = 'b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: "a c", anchor: anchor});'
+    assert run("clock += 100; " + ok) == 1, "an edit right after leaving Edit text is kept"
+    assert run("clock += 3001; " + ok) == 0, "a late one is dropped"
+    assert run('b.receive({rd: 1, type: "edit", id: null, alt: 1, neu: "x", anchor: anchor}); ' + ok) == 0, \
+        "a malformed edit uses the allowance up"
+    assert run('b.receive({rd: 1, type: "edit", id: "h-unknown", alt: "a b", neu: "x", anchor: anchor}); ' + ok) == 0, \
+        "an edit for an unknown id uses it up too"
+    out = _backend_run("""
+var clock = 1000;
+env.now = function () { return clock; };
+b.backend.mode("edit");
+b.backend.mode("comment");
+""" + HELLO + """
+b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: "a c", anchor: {sel: "p", tag: "<p>", text: "a b"}});
+return Object.keys(state.data.edits).length;""")
+    assert out == 0, "leaving Edit text before the page is up arms nothing"
+
+
+ADOPTED = {"marks": {}, "edits": {"x": {"sec": "", "alt": "a b c d e f g h i j", "neu": "a c d e f g h I j",
+                                        "sel": "p", "tag": "<p>", "text": "a b"}}}
+ADOPTED_DRAWN = ('b.receive({rd: 1, type: "drawn", stops: [{key: "e:x:0", kind: "edit"}], rects: {}, '
+                 'found: {"e:x": {step: 1, sel: "p", adopted: true}}});')
+
+
+@test
+def test_backend_adopted_revert_rebases():
+    out = _backend_run(HELLO + ADOPTED_DRAWN + """
+b.receive({rd: 1, type: "run-click", id: "x", n: 0, rect: {left: 0, top: 0, right: 1, bottom: 1}});
+return state.data.edits.x;""", ADOPTED)
+    assert out["alt"] == "a c d e f g h I j" and out["neu"] == "a c d e f g h i j", out
+    one = {"marks": {}, "edits": {"x": dict(ADOPTED["edits"]["x"], alt="a b", neu="a c")}}
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [{key: "e:x:0", kind: "edit"}], rects: {},
+           found: {"e:x": {step: 1, sel: "p", adopted: true}}});
+b.receive({rd: 1, type: "run-click", id: "x", n: 0, rect: {left: 0, top: 0, right: 1, bottom: 1}});
+return state.data.edits.x || null;""", one)
+    assert out == {"sec": "", "alt": "a c", "neu": "a b", "sel": "p", "tag": "<p>", "text": "a b"}, \
+        "reverting the only run of an adopted rewrite asks for the old words back"
+
+
+@test
+def test_backend_adopted_re_edit_rebases():
+    out = _backend_run(HELLO + ADOPTED_DRAWN + """
+b.backend.mode("edit");
+var anchor = {sel: "p", tag: "<p>", text: "a c"};
+b.receive({rd: 1, type: "edit", id: "x", alt: "a c d e f g h I j", neu: "a c d e f g h I J", anchor: anchor});
+var first = JSON.parse(JSON.stringify(state.data.edits.x));
+b.receive({rd: 1, type: "edit", id: "x", alt: "a c d e f g h I j", neu: "a c d e f g h I j", anchor: anchor});
+return [first, "x" in state.data.edits];""", ADOPTED)
+    assert out[0]["alt"] == "a c d e f g h I j" and out[0]["neu"] == "a c d e f g h I J", out
+    assert out[1] is False, "back to what the page shows: nothing left to change"
+    out = _backend_run(HELLO + """
+b.backend.mode("edit");
+b.receive({rd: 1, type: "edit", id: "x", alt: "a c d e f g h I j", neu: "zz", anchor: {sel: "p", tag: "<p>", text: "a"}});
+return state.data.edits.x;""", ADOPTED)
+    assert out["alt"] == "a b c d e f g h i j" and out["neu"] == "zz", "not adopted: the stored alt stays"
 
 
 @test

@@ -169,9 +169,14 @@
     var EDIT_MAX = 20000;
     /* Switching away from Edit text makes the probe commit the open edit, and
        that edit arrives after chosen has already changed. Leaving Edit text
-       allows exactly one more edit (decision 11); the first edit taken, every
-       hello and every bye use the allowance up. */
-    var allowEdit = false;
+       allows exactly one more edit, and only within EDIT_GRACE (ruling 7): a
+       flag alone would stay open for a page script to forge an edit much later.
+       Any edit message that reaches the allowance uses it up, taken or not, and
+       so does every hello and every bye. */
+    var EDIT_GRACE = 3000;
+    var allowEdit = false, leftAt = -Infinity;
+
+    function now() { return env.now ? env.now() : Date.now(); }
 
     function frameRect() { return env.frameRect(); }
 
@@ -348,11 +353,24 @@
         if (!own(host.state.data.edits, id)) return;
         var cur = host.state.data.edits[id];
         var text = revertedText(host.runs(cur.alt, cur.neu) || runs, n);
-        if (text === cur.alt) delete host.state.data.edits[id];
-        else cur.neu = text;
+        rewrite(id, cur, text);
         host.save("revert:" + id);
         changed();
       });
+    }
+
+    /* A rewrite takes new text. One the page already carried (adopted) is
+       rebased (ruling 9): the source shows its neu, so that becomes the alt
+       Claude starts from. Either way it goes when nothing is left to change. */
+    function rewrite(id, cur, text) {
+      var f = found["e:" + id];
+      /* Rebased once: until the next drawn, it is an ordinary rewrite. */
+      if (f && f.adopted) {
+        cur.alt = cur.neu;
+        f.adopted = false;
+      }
+      if (text === cur.alt) delete host.state.data.edits[id];
+      else cur.neu = text;
     }
 
     /* Decision 11: a new element gets its id here; the next draw carries it with
@@ -362,7 +380,11 @@
       /* The page's own scripts can post edits too: none is taken unless the
          reviewer chose Edit text (or just left it), and none large enough to
          bloat the state. */
-      if (chosen !== "edit" && !allowEdit) return;
+      if (chosen !== "edit") {
+        var allowed = allowEdit && now() - leftAt <= EDIT_GRACE;
+        allowEdit = false;
+        if (!allowed) return;
+      }
       if (!isStr(m.alt) || !isStr(m.neu)) return;
       if (m.alt.length > EDIT_MAX || m.neu.length > EDIT_MAX) return;
       if (!a || typeof a !== "object" || !isStr(a.sel) || !isStr(a.tag) || !isStr(a.text)) return;
@@ -373,13 +395,12 @@
         postDraw();
         return;
       }
-      allowEdit = false;
       var id = m.id === null ? newEditId() : m.id;
       var cur = m.id === null ? null : edits[id];
-      if (m.neu === (cur ? cur.alt : m.alt)) {
+      if (cur) {
+        rewrite(id, cur, m.neu);
+      } else if (m.neu === m.alt) {
         delete edits[id];
-      } else if (cur) {
-        cur.neu = m.neu;
       } else {
         edits[id] = {sec: "", alt: m.alt, neu: m.neu, sel: a.sel, tag: a.tag, text: a.text};
       }
@@ -559,7 +580,10 @@
       closed: closed,
       /* The reviewer's choice is kept while away and comes back on the entry. */
       mode: function (m) {
-        if (chosen === "edit" && m !== "edit") allowEdit = true;
+        if (chosen === "edit" && m !== "edit" && live()) {
+          allowEdit = true;
+          leftAt = now();
+        }
         chosen = m;
         if (up) env.post("mode", {mode: effective()});
       }
