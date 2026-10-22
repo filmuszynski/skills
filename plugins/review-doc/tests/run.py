@@ -2857,12 +2857,14 @@ def test_to_shell_adds_the_frame_offset():
 
 def _backend_run(expr, data=None):
     """createBackend in node with a fake host and env; posts and host calls are recorded."""
-    pre = RUN_PRE + """
+    pre = RUN_PRE + OFFSET_PRELUDE + """
 var calls = [], posts = [], enabled = null, awayAt = "unset";
+var noted = [], scope = "current", driftMap = {}, lostShown = "unset", lostPick = null, pulsed = [];
 var state = {mode: "comment", data: %s};
 var host = {state: state,
   ask: function (c) { calls.push(["ask", c.quote, c.rect.left, c.extra.sel]); c.clear(); },
   showComment: function (id, r) { calls.push(["showComment", id, r.top]); },
+  showEarlier: function (k, r) { calls.push(["showEarlier", k, r.top]); },
   showChange: function (r, was, now, head, label, fn) { calls.push(["showChange", was, now, head, label]); fn(); },
   closeBubble: function () { calls.push(["closeBubble"]); },
   save: function (k) { calls.push(["save", k]); },
@@ -2870,12 +2872,19 @@ var host = {state: state,
   updatePrompt: function () { calls.push(["updatePrompt"]); },
   undo: function () { calls.push(["undo"]); }, redo: function () { calls.push(["redo"]); },
   runs: function (a, n) { var o = diffTokens(tokenize(a), tokenize(n)); return o ? coalesceRuns(buildRuns(o)) : null; },
-  fineRuns: function (a, n) { var o = diffTokens(tokenize(a), tokenize(n)); return o ? buildRuns(o) : null; }};
+  fineRuns: function (a, n) { var o = diffTokens(tokenize(a), tokenize(n)); return o ? buildRuns(o) : null; },
+  noteEarlier: function (k, info) { noted.push([k, info]); },
+  runOffsets: runOffsets,
+  scope: function () { return scope; },
+  drift: function () { return driftMap; }};
 var env = {entry: "index.html",
   post: function (type, f) { posts.push([type, f || {}]); },
   frameRect: function () { return {left: 10, top: 20, right: 810, bottom: 620}; },
   enable: function (on) { enabled = on; },
   away: function (p) { awayAt = p; },
+  lost: function (list, pick) { lostShown = list; lostPick = pick; },
+  pillRect: function (key) { return {left: 500, top: 5, right: 560, bottom: 25, key: key}; },
+  pulsePill: function (key) { pulsed.push(key); },
   later: function (fn, ms) { timers.push([fn, ms]); return timers.length; },
   cancel: function (h) { if (h) timers[h - 1] = null; }};
 var timers = [];
@@ -2883,14 +2892,16 @@ var b;
 """ % json.dumps(data or {"marks": {}, "edits": {}})
     fns = RUN_FNS + [("isEntryPath", SH), ("revertedText", SH), ("toShell", SH), ("isStr", SH),
                      ("isNum", SH), ("own", SH), ("cleanRect", SH), ("cleanAnchor", SH),
-                     ("newEditId", SH), ("createBackend", SH)]
+                     ("newEditId", SH), ("isEarlierKey", SH), ("tagNameOf", SH), ("neuOffsets", SH),
+                     ("pillLabel", SH), ("squeeze", "shell.js"), ("runOffsets", "shell.js"),
+                     ("createBackend", SH)]
     return run_js(fns, "(function () { b = createBackend(host, env); %s })()" % expr, pre)
 
 
 @test
 def test_html_backend_has_the_seam_methods():
     out = _backend_run("return Object.keys(b.backend).sort();")
-    assert out == sorted("draw stops rect scrollTo open isEarlier mode closed".split()), out
+    assert out == sorted("draw stops rect scrollTo open isEarlier mode closed rescope".split()), out
     out = _backend_run("return [b.backend.isEarlier(), b.backend.stops('all').length];")
     assert out == [False, 0], out
 
@@ -3233,22 +3244,6 @@ return [inComment, tooLong, Object.keys(state.data.edits).length,
 
 
 @test
-def test_html_backend_keeps_an_edit_committed_by_a_mode_switch():
-    def run(delay):
-        return _backend_run(HELLO + """
-var clock = 1000;
-env.now = function () { return clock; };
-var anchor = {sel: "p", tag: "<p>", text: "a b"};
-b.backend.mode("edit");
-b.backend.mode("comment");
-clock += %d;
-b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: "a c", anchor: anchor});
-return Object.keys(state.data.edits).length;""" % delay)
-    assert run(100) == 1, "an edit right after leaving Edit text is kept"
-    assert run(5000) == 0, "a late one is dropped"
-
-
-@test
 def test_flat_text_wbr_and_img_add_nothing():
     out = run_probe('[flatText(el("p", ["super", el("wbr", []), "long"])).text, '
                     'flatText(el("p", ["a", el("img", []), "b"])).text, '
@@ -3276,6 +3271,224 @@ function fresh() { state = {mode: "use", data: {}, ui: {head: true, zoom: 1, sco
   return [a, state.mode, state.ui.zoom, asked];
 })()""", pre)
     assert out == [["use", 1.5, False], "edit", 2, ['.modes button[data-mode="edit"]']], out
+
+
+# ------------------------------------------------ phase 4: found, the lost strip, earlier rounds
+
+R1 = {"left": 1, "top": 2, "right": 3, "bottom": 4}
+LOST_DATA = {"marks": {"a": {"sec": "", "quote": "first words", "occ": 0, "sel": "p", "comment": "x"},
+                       "b": {"sec": "", "quote": "second", "occ": 0, "sel": "p", "comment": "y"},
+                       "c": {"sec": "", "quote": "This is a fairly long  quoted\npassage here", "occ": 0,
+                             "sel": "h1", "comment": "z"}},
+             "edits": {"x": {"sec": "", "alt": "a b", "neu": "a c", "sel": "p", "tag": '<p class="lead">',
+                             "text": "a b"}}}
+
+
+@test
+def test_backend_drift_from_found():
+    out = _backend_run(HELLO + """
+driftMap.a = "moved";
+b.receive({rd: 1, type: "drawn", stops: [], rects: {},
+           found: {"m:a": {step: 1, sel: "p"}, "m:b": {step: 3, sel: "p"}, "m:c": {step: 0, sel: "h1"}}});
+return driftMap;""", LOST_DATA)
+    assert out == {"b": "moved", "c": "gone"}, out
+
+
+@test
+def test_backend_lost_items_are_stops_last():
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [{key: "m:a", kind: "comment"}], rects: {"m:a": %s},
+           found: {"e:x": {step: 0, sel: "p"}, "m:a": {step: 1, sel: "p"}, "m:c": {step: 0, sel: "h1"},
+                   "m:nope": {step: 0, sel: "p"}, "__proto__": {step: 0}}});
+return [b.backend.stops("all"), b.backend.stops("comments"), b.backend.stops("edits"), lostShown];""" % json.dumps(R1),
+        LOST_DATA)
+    assert out[0] == ["m:a", "lost:m:c", "lost:e:x"], out
+    assert out[1] == ["m:a", "lost:m:c"], out
+    assert out[2] == ["lost:e:x"], out
+    assert out[3] == [{"key": "m:c", "label": 'Comment "This is a fairly long qu…"', "earlier": False},
+                      {"key": "e:x", "label": "Rewrite in p", "earlier": False}], out[3]
+
+
+@test
+def test_backend_lost_pills_open_their_bubbles():
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [], rects: {},
+           found: {"m:c": {step: 0, sel: "h1"}, "e:x": {step: 0, sel: "p"}}});
+lostPick("m:c");
+lostPick("nope");
+var r = b.backend.rect("lost:m:c");
+var n = posts.length;
+b.backend.open("lost:m:c");
+b.backend.scrollTo("lost:e:x");
+var quiet = posts.length - n;
+lostPick("e:x");
+return [calls.filter(function (c) { return c[0] !== "updatePrompt" && c[0] !== "draw"; }), r.key, r.top,
+        pulsed, quiet, "x" in state.data.edits];""", LOST_DATA)
+    assert out[0] == [["showComment", "c", 5], ["showChange", "a b", "a c", "This rewrite", "Revert this"],
+                      ["save", "revert:x"]], out[0]
+    assert out[1] == "m:c" and out[2] == 5, out
+    assert out[3] == ["e:x"] and out[4] == 0, out
+    assert out[5] is False, "Revert this removes the lost rewrite"
+
+
+@test
+def test_backend_lost_pills_follow_the_scope():
+    data = dict(LOST_DATA, rounds=[{"marks": {"p": {"sec": "", "quote": "old", "occ": 0, "sel": "p", "comment": "o"}},
+                                    "edits": {"q": {"sec": "", "alt": "u v", "neu": "u w", "sel": "h2",
+                                                    "tag": "<h2>", "text": "u v"}}}])
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [{key: "m:a", kind: "comment"}, {key: "r0:m:p", kind: "comment", earlier: true}],
+           rects: {}, found: {"m:c": {step: 0}, "r0:m:p": {step: 1}, "r0:e:q": {step: 0}}});
+var cur = [b.backend.stops("all"), lostShown.map(function (p) { return p.key; })];
+scope = "previous"; b.backend.rescope();
+var prev = [b.backend.stops("all"), lostShown];
+scope = "all"; b.backend.rescope();
+var all = [b.backend.stops("all"), lostShown.map(function (p) { return p.key; })];
+b.receive({rd: 1, type: "bye"});
+return [cur, prev, all, lostShown, b.backend.stops("all")];""", data)
+    assert out[0] == [["m:a", "lost:m:c"], ["m:c"]], out[0]
+    assert out[1] == [["r0:m:p", "lost:r0:e:q"],
+                      [{"key": "r0:e:q", "label": "Earlier rewrite in h2", "earlier": True}]], out[1]
+    assert out[2] == [["m:a", "r0:m:p", "lost:m:c", "lost:r0:e:q"], ["m:c", "r0:e:q"]], out[2]
+    assert out[3] == [] and out[4] == [], "away from the page the strip is hidden"
+
+
+@test
+def test_backend_lost_strip_hidden_away_from_the_entry():
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [], rects: {}, found: {"m:c": {step: 0}}});
+var on = lostShown.length;
+b.receive({rd: 1, type: "hello", path: "/about.html", title: "A"});
+return [on, lostShown];""", LOST_DATA)
+    assert out == [1, []], out
+
+
+@test
+def test_backend_is_earlier_key():
+    out = run_js(["isEarlierKey"], '["r0:m:a", "lost:r1:e:x", "m:a", "lost:m:a", "e:r0:1", "r:m:a"]'
+                 '.map(function (k) { return isEarlierKey(k); })', asset=SH)
+    assert out == [True, True, False, False, False, False], out
+
+
+@test
+def test_backend_sends_earlier_and_notes_info():
+    data = {"marks": {"m1": {"sec": "", "quote": "one", "occ": 2, "sel": "p", "comment": "c", "tag": "<p>",
+                             "text": "one two", "before": "", "after": " two"}},
+            "edits": {"h1": {"sec": "", "alt": "x y z", "neu": "x y Z", "sel": "li", "tag": "<li>", "text": "x y z"}},
+            "rounds": [{"marks": {"a": {"sec": "", "quote": "q a", "occ": 1, "sel": "p", "tag": "<p>", "text": "q a b",
+                                        "before": "B", "after": "A", "comment": "c1"}},
+                        "edits": {"x": {"sec": "", "alt": "a b", "neu": "a c", "sel": "h2", "tag": "<h2>",
+                                        "text": "a b"}}}]}
+    out = _backend_run(HELLO + """
+var d = posts.filter(function (p) { return p[0] === "draw"; }).slice(-1)[0][1];
+return [d.marks, d.edits[0].offs, d.edits[0].tag, d.edits[0].text, d.earlier, noted];""", data)
+    assert out[0] == [{"id": "m1", "quote": "one", "occ": 2, "sel": "p", "tag": "<p>", "text": "one two",
+                       "before": "", "after": " two"}], out[0]
+    assert out[1] == [[4, 5]] and out[2] == "<li>" and out[3] == "x y z", out
+    assert out[4] == [{"key": "r0:m:a", "kind": "comment", "quote": "q a", "occ": 1, "sel": "p", "tag": "<p>",
+                       "text": "q a b", "before": "B", "after": "A"},
+                      {"key": "r0:e:x", "kind": "edit", "sel": "h2", "tag": "<h2>", "text": "a b",
+                       "alt": "a b", "neu": "a c", "offs": [[2, 3]]}], out[4]
+    assert out[5] == [["r0:m:a", {"kind": "comment", "quote": "q a", "comment": "c1"}],
+                      ["r0:e:x", {"kind": "edit", "was": "a b", "now": "a c"}]], out[5]
+
+
+@test
+def test_neu_offsets_point_into_the_flat_new_text():
+    """The probe's flat text keeps its spaces; runOffsets counts squeezed text."""
+    pre = OFFSET_PRELUDE
+    expr = ('(function () { var alt = "a b c d e f g h i j", neu = "a c d e f g h I j";'
+            ' var runs = coalesceRuns(buildRuns(diffTokens(tokenize(alt), tokenize(neu))));'
+            ' var o = neuOffsets(runs, runOffsets(alt, neu));'
+            ' return [o, neu.slice(o.pairs[0][0], o.pairs[0][1])]; })()')
+    out = run_js([(n, "shell.js") for n in OFFSET_FNS] + [("neuOffsets", SH)], expr, pre)
+    assert out == [{"pairs": [[14, 15]], "index": [1]}, "I"], out
+
+
+@test
+def test_backend_adopted_run_click_maps_through_offs():
+    data = {"marks": {}, "edits": {"x": {"sec": "", "alt": "a b c d e f g h i j", "neu": "a c d e f g h I j",
+                                         "sel": "p", "tag": "<p>", "text": "a b"}}}
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [{key: "e:x:0", kind: "edit"}], rects: {},
+           found: {"e:x": {step: 1, sel: "p", adopted: true}}});
+b.receive({rd: 1, type: "run-click", id: "x", n: 0, rect: {left: 0, top: 0, right: 1, bottom: 1}});
+return [calls.filter(function (c) { return c[0] === "showChange"; }), state.data.edits.x.neu];""", data)
+    assert out[0] == [["showChange", "i", "I", "This change", "Revert this"]], out[0]
+    assert out[1] == "a c d e f g h i j", out
+
+
+@test
+def test_backend_edit_allowance_is_one_shot():
+    out = _backend_run(HELLO + """
+var anchor = {sel: "p", tag: "<p>", text: "a b"};
+b.backend.mode("edit");
+b.backend.mode("comment");
+b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: "a c", anchor: anchor});
+b.receive({rd: 1, type: "edit", id: null, alt: "d e", neu: "d f", anchor: anchor});
+var first = Object.keys(state.data.edits).length;
+b.backend.mode("edit");
+b.backend.mode("comment");
+b.receive({rd: 1, type: "bye"});
+b.receive({rd: 1, type: "edit", id: null, alt: "g h", neu: "g i", anchor: anchor});
+var afterBye = Object.keys(state.data.edits).length;
+b.backend.mode("edit");
+b.backend.mode("comment");
+b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});
+b.receive({rd: 1, type: "edit", id: null, alt: "j k", neu: "j l", anchor: anchor});
+return [first, afterBye, Object.keys(state.data.edits).length];""")
+    assert out == [1, 1, 1], out
+    sh = shell._asset(SH)
+    assert "EDIT_GRACE" not in sh and "leftEdit" not in sh
+
+
+@test
+def test_backend_rects_message_refreshes_rect():
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [{key: "m:a", kind: "comment"}], rects: {"m:a": %s}, found: {}});
+var before = b.backend.rect("m:a");
+b.receive({rd: 1, type: "rects", rects: {"m:a": {left: 5, top: 6, right: 7, bottom: 8},
+                                         "m:zz": {left: 9, top: 9, right: 9, bottom: 9}}});
+var after = b.backend.rect("m:a"), stray = b.backend.rect("m:zz");
+b.receive({rd: 1, type: "rects", rects: "nope"});
+return [before, after, stray, b.backend.rect("m:a")];""" % json.dumps(R1), LOST_DATA)
+    assert out[0] == {"left": 11, "top": 22, "right": 13, "bottom": 24}, out
+    assert out[1] == {"left": 15, "top": 26, "right": 17, "bottom": 28}, out
+    assert out[2] == {"left": 10, "top": 20, "right": 10, "bottom": 20}, "only stop keys are kept"
+    assert out[3] == out[1], "a malformed rects message changes nothing"
+
+
+@test
+def test_backend_earlier_click_opens_the_earlier_bubble():
+    data = dict(LOST_DATA, rounds=[{"marks": {"p": {"sec": "", "quote": "old", "occ": 0, "sel": "p",
+                                                    "comment": "o"}}, "edits": {}}])
+    out = _backend_run(HELLO + """
+var rect = {left: 0, top: 3, right: 1, bottom: 4};
+b.receive({rd: 1, type: "earlier-click", key: "r0:m:p", rect: rect});
+b.receive({rd: 1, type: "earlier-click", key: "r4:m:p", rect: rect});
+b.receive({rd: 1, type: "earlier-click", key: "m:a", rect: rect});
+b.receive({rd: 1, type: "earlier-click", key: "r0:m:p", rect: {left: "0"}});
+return calls;""", data)
+    assert out == [["showEarlier", "r0:m:p", 23]], out
+
+
+@test
+def test_tag_name_of_copies_agree():
+    def norm(s):
+        return re.sub(r"\s+", " ", s).strip()
+    assert norm(js_function("tagNameOf", SH)) == norm(js_function("tagNameOf", "probe.js"))
+
+
+@test
+def test_gone_hint_only_for_gone():
+    cb = js_function("commentBubble")
+    assert '"gone"' in cb and "The marked text is no longer on the page." in cb
+    assert '"The marked text has changed since. This is where it is now."' in cb
+    assert '"The marked text is no longer in this section."' in cb
+    js = shell._asset("shell.js")
+    assert "noteEarlier: function (key, info) { prevInfo[key] = info; }" in js
+    assert "runOffsets: runOffsets" in js and "scope: scopeNow" in js
+    assert "if (backend.rescope) backend.rescope();" in js_function("onScope")
 
 
 def main():

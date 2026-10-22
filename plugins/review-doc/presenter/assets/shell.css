@@ -433,6 +433,46 @@ body.mode-edit .modes.three::before { transform: translateX(200%); }
 }
 .html-away:not([hidden]) { display: flex; }
 
+/* HTML pages: items the page no longer has a place for, one pill each, under
+   the header and above the frame. Shown only when one is in the counters' scope. */
+.html-lost {
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 7px 18px;
+  background: #fbeedd;
+  border-bottom: 1px solid var(--accent);
+  color: var(--ink);
+  font-size: 13px;
+}
+.html-lost:not([hidden]) { display: flex; }
+.lost-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+/* The current round's pill is md's section pill for a comment whose passage is
+   gone; a rewrite takes the rewrite colour, as md's table-change pill does. */
+.lost-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 0;
+  border-radius: 9px;
+  font: inherit;
+  font-size: 12px;
+  color: #33280a;
+  background: var(--mark);
+  cursor: pointer;
+}
+.lost-pill[data-key^="e:"] { color: #3a1a08; background: rgba(240, 132, 78, .45); }
+.lost-pill:hover { filter: brightness(1.08); }
+/* An earlier round's pill is md's earlier pill: the current one in outline. */
+.lost-pill.earlier {
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--label);
+  filter: none;
+}
+.lost-pill.earlier:hover { border-color: var(--label); }
+
 /* ------------------------------------------------------------------ main */
 
 main { min-height: 0; }

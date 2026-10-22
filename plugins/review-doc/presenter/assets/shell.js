@@ -265,6 +265,8 @@
     state.ui.scope = nextScope(scopeNow());
     navAt = { comments: -1, edits: -1, all: -1 };
     persist();
+    /* Optional: an HTML page's lost-items strip follows the scope. */
+    if (backend.rescope) backend.rescope();
     updateCounters();
     flash(SCOPE_TIPS[state.ui.scope], "", 1800);
   }
@@ -2099,8 +2101,10 @@
       b.appendChild(mkEl("p", "bubble-quote", truncate(entry.quote, QUOTE_CAP)));
       b.appendChild(mkEl("p", "bubble-body", entry.comment));
       if (drift[id]) {
+        /* "gone" is set only by an HTML page's backend. */
         b.appendChild(mkEl("p", "bubble-hint", drift[id] === "moved"
           ? "The marked text has changed since. This is where it is now."
+          : drift[id] === "gone" ? "The marked text is no longer on the page."
           : "The marked text is no longer in this section."));
       }
       var row = actionsRow();
@@ -3738,6 +3742,10 @@
       ask: askComment,
       showComment: commentBubble,
       showEarlier: earlierBubble,
+      /* An earlier round's bubble text, for items md's anchorEarlier never sees. */
+      noteEarlier: function (key, info) { prevInfo[key] = info; },
+      runOffsets: runOffsets,
+      scope: scopeNow,
       closeBubble: closeBubble,
       save: save,
       updatePrompt: updatePrompt,

@@ -98,9 +98,58 @@
     return "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
 
+  /* An earlier round's item key (r<i>:m:<id>, r<i>:e:<id>), or its lost stop. */
+  function isEarlierKey(key) {
+    return /^(lost:)?r\d+:/.test(key);
+  }
+
+  /* A copy of probe.js's tagNameOf, pinned equal by a test: the shell cannot
+     call into the frame. */
+  function tagNameOf(startTag) {
+    var m = /^<\s*([a-zA-Z][a-zA-Z0-9-]*)/.exec(String(startTag || ""));
+    return m ? m[1].toLowerCase() : "";
+  }
+
+  /* The entries of runOffsets(alt, neu), placed in the new text as the probe
+     reads it. runOffsets counts squeezed text, without spaces, and the probe's
+     flat text keeps them, so its positions would land short. Same entries,
+     same order: a changed run is kept when it is the next one runOffsets kept.
+     `index` gives the changed run (as revertedText counts them) of each entry,
+     which is how a click on an adopted rewrite's k-th underline finds its run. */
+  function neuOffsets(runs, offs) {
+    var pairs = [], index = [], pos = 0, c = 0, k = 0;
+    for (var i = 0; i < (runs || []).length; i++) {
+      var r = runs[i];
+      if (r.same) { pos += r.text.length; continue; }
+      if (k < offs.length && r.added === offs[k].now) {
+        pairs.push([pos, pos + r.added.length]);
+        index.push(c);
+        k++;
+      }
+      pos += r.added.length;
+      c++;
+    }
+    return {pairs: pairs, index: index};
+  }
+
+  /* A pill's words: the first 24 characters of a comment's quote, or the
+     element a rewrite is in. */
+  function pillLabel(kind, earlier, entry) {
+    var head = earlier ? (kind === "comment" ? "Earlier comment" : "Earlier rewrite")
+                       : (kind === "comment" ? "Comment" : "Rewrite");
+    if (kind === "comment") {
+      var flat = String(entry.quote || "").replace(/\s+/g, " ").trim();
+      return head + ' "' + (flat.length > 24 ? flat.slice(0, 24) + "…" : flat) + '"';
+    }
+    var tag = tagNameOf(entry.tag);
+    return tag ? head + " in " + tag : head;
+  }
+
   /* The backend and its message handling, with the DOM kept out: env gives
      post(type, fields), frameRect(), entry, enable(on) for the Comment and Edit
-     text buttons, and away(path or null) for the strip. Everything is read from
+     text buttons, away(path or null) for the strip, and lost(pills, pick),
+     pillRect(item key) and pulsePill(item key) for the lost-items strip.
+     Everything is read from
      host.state.data at the moment it is needed, because undo and redo replace
      that object wholesale. The backend never deletes a comment it could not
      draw: the counters and the prompt count state, not stops (decision 8). */
@@ -108,6 +157,8 @@
     var chosen = host.state.mode || "use";
     var up = false, onEntry = false, due = true, opened = false, asking = false;
     var stops = [], rects = Object.create(null), helloTimer = null;
+    /* The last drawn's lookup step per item key, and the item keys at step 0. */
+    var found = Object.create(null), lost = [];
     var later = env.later || function (fn, ms) { return setTimeout(fn, ms); };
     var cancel = env.cancel || function (h) { clearTimeout(h); };
 
@@ -117,12 +168,10 @@
     /* Characters an edit's before or after text may hold. */
     var EDIT_MAX = 20000;
     /* Switching away from Edit text makes the probe commit the open edit, and
-       that edit arrives after chosen has already changed; it is still taken
-       for this long after Edit text was left. */
-    var EDIT_GRACE = 3000;
-    var leftEdit = -Infinity;
-
-    function now() { return env.now ? env.now() : Date.now(); }
+       that edit arrives after chosen has already changed. Leaving Edit text
+       allows exactly one more edit (decision 11); the first edit taken, every
+       hello and every bye use the allowance up. */
+    var allowEdit = false;
 
     function frameRect() { return env.frameRect(); }
 
@@ -130,24 +179,122 @@
 
     function effective() { return live() ? chosen : "use"; }
 
+    function offsOf(alt, neu) {
+      return neuOffsets(host.runs(alt, neu), host.runOffsets(alt, neu));
+    }
+
+    /* The item an item key names (m:<id>, e:<id>, r<i>:m:<id>, r<i>:e:<id>),
+       or null when the state holds no such item. */
+    function itemOf(key) {
+      var m = isStr(key) ? /^(?:r(0|[1-9]\d*):)?([me]):(.+)$/.exec(key) : null;
+      if (!m) return null;
+      var src = host.state.data, earlier = m[1] !== undefined;
+      if (earlier) {
+        src = Array.isArray(src.rounds) ? src.rounds[Number(m[1])] : null;
+        if (!src || typeof src !== "object") return null;
+      }
+      var map = m[2] === "m" ? src.marks : src.edits;
+      if (!own(map, m[3]) || !map[m[3]] || typeof map[m[3]] !== "object") return null;
+      return {kind: m[2] === "m" ? "comment" : "edit", earlier: earlier, id: m[3], entry: map[m[3]]};
+    }
+
+    /* Every item key in state order: comments before rewrites, the current
+       round first, then the earlier rounds oldest first (decision 9). */
+    function itemKeys() {
+      var data = host.state.data, out = [], rounds = Array.isArray(data.rounds) ? data.rounds : [];
+      function add(pre, src) {
+        if (!src || typeof src !== "object") return;
+        Object.keys(src.marks || {}).forEach(function (id) { out.push(pre + "m:" + id); });
+        Object.keys(src.edits || {}).forEach(function (id) { out.push(pre + "e:" + id); });
+      }
+      add("", data);
+      for (var i = 0; i < rounds.length; i++) add("r" + i + ":", rounds[i]);
+      return out;
+    }
+
+    /* The counters' scope: earlier items in Previous, current ones in Current. */
+    function inScope(key) {
+      var s = host.scope ? host.scope() : "current";
+      return s === "all" || (s === "previous") === isEarlierKey(key);
+    }
+
     function postDraw() {
       due = false;
-      var data = host.state.data, marks = [], edits = [], id;
+      var data = host.state.data, marks = [], edits = [], earlier = [], id, key;
       for (id in data.marks) {
         var mk = data.marks[id];
-        marks.push({id: id, quote: mk.quote, occ: mk.occ || 0, sel: mk.sel});
+        marks.push({id: id, quote: mk.quote, occ: mk.occ || 0, sel: mk.sel, tag: mk.tag || "",
+                    text: mk.text || "", before: mk.before || "", after: mk.after || ""});
       }
       for (id in data.edits) {
         var ed = data.edits[id];
-        edits.push({id: id, sel: ed.sel, alt: ed.alt, neu: ed.neu,
+        edits.push({id: id, sel: ed.sel, alt: ed.alt, neu: ed.neu, tag: ed.tag || "", text: ed.text || "",
+                    offs: offsOf(ed.alt, ed.neu).pairs,
                     runs: host.runs(ed.alt, ed.neu), fine: host.fineRuns(ed.alt, ed.neu)});
       }
-      env.post("draw", {marks: marks, edits: edits});
+      /* Earlier rounds are drawn as tint, and their bubbles read from the
+         host's prevInfo, the map md's earlier rounds fill. */
+      var rounds = Array.isArray(data.rounds) ? data.rounds : [];
+      for (var ri = 0; ri < rounds.length; ri++) {
+        var rd = rounds[ri];
+        if (!rd || typeof rd !== "object") continue;
+        for (id in rd.marks || {}) {
+          var em = rd.marks[id];
+          if (!em || typeof em !== "object" || !isStr(em.quote)) continue;
+          key = "r" + ri + ":m:" + id;
+          earlier.push({key: key, kind: "comment", quote: em.quote, occ: em.occ || 0, sel: em.sel || "",
+                        tag: em.tag || "", text: em.text || "", before: em.before || "", after: em.after || ""});
+          host.noteEarlier(key, {kind: "comment", quote: em.quote, comment: em.comment});
+        }
+        for (id in rd.edits || {}) {
+          var ee = rd.edits[id];
+          if (!ee || typeof ee !== "object" || !isStr(ee.alt) || !isStr(ee.neu)) continue;
+          key = "r" + ri + ":e:" + id;
+          earlier.push({key: key, kind: "edit", sel: ee.sel || "", tag: ee.tag || "", text: ee.text || "",
+                        alt: ee.alt, neu: ee.neu, offs: offsOf(ee.alt, ee.neu).pairs});
+          host.noteEarlier(key, {kind: "edit", was: ee.alt, now: ee.neu});
+        }
+      }
+      env.post("draw", {marks: marks, edits: edits, earlier: earlier});
+    }
+
+    /* The strip of items the page no longer has a place for. It shows the pills
+       in the counters' scope, and none while the frame is away from the entry. */
+    function renderLost() {
+      var pills = [];
+      for (var i = 0; live() && i < lost.length; i++) {
+        var it = itemOf(lost[i]);
+        if (!it || !inScope(lost[i])) continue;
+        pills.push({key: lost[i], label: pillLabel(it.kind, it.earlier, it.entry), earlier: it.earlier});
+      }
+      env.lost(pills, pick);
+    }
+
+    /* A pill opens the bubble its item opens on the page. */
+    function pick(key) {
+      var it = lost.indexOf(key) === -1 ? null : itemOf(key), rect = it ? env.pillRect(key) : null;
+      if (!rect) return;
+      if (it.earlier) {
+        host.showEarlier(key, rect);
+      } else if (it.kind === "comment") {
+        host.showComment(it.id, rect);
+      } else {
+        var id = it.id;
+        host.showChange(rect, it.entry.alt, it.entry.neu, "This rewrite", "Revert this", function () {
+          if (!own(host.state.data.edits, id)) return;
+          delete host.state.data.edits[id];
+          host.save("revert:" + id);
+          changed();
+        });
+      }
     }
 
     function forget() {
       stops = [];
       rects = Object.create(null);
+      found = Object.create(null);
+      lost = [];
+      renderLost();
     }
 
     /* A bubble that lit a comment in the frame lets it go when it closes. */
@@ -183,14 +330,20 @@
         });
         return;
       }
+      /* On a rewrite the page already carried, the probe numbers the underlines
+         along offs, which leaves out runs that only removed words. */
+      var n = m.n, f = found["e:" + id];
+      if (f && f.adopted) {
+        n = offsOf(ed.alt, ed.neu).index[m.n];
+        if (n === undefined) return;
+      }
       var run = null, k = 0;
       for (var i = 0; i < runs.length; i++) {
         if (runs[i].same) continue;
-        if (k === m.n) run = runs[i];
+        if (k === n) run = runs[i];
         k++;
       }
       if (!run) return;
-      var n = m.n;
       host.showChange(rect, run.removed, run.added, "This change", "Revert this", function () {
         if (!own(host.state.data.edits, id)) return;
         var cur = host.state.data.edits[id];
@@ -209,7 +362,7 @@
       /* The page's own scripts can post edits too: none is taken unless the
          reviewer chose Edit text (or just left it), and none large enough to
          bloat the state. */
-      if (chosen !== "edit" && !(now() - leftEdit <= EDIT_GRACE)) return;
+      if (chosen !== "edit" && !allowEdit) return;
       if (!isStr(m.alt) || !isStr(m.neu)) return;
       if (m.alt.length > EDIT_MAX || m.neu.length > EDIT_MAX) return;
       if (!a || typeof a !== "object" || !isStr(a.sel) || !isStr(a.tag) || !isStr(a.text)) return;
@@ -220,6 +373,7 @@
         postDraw();
         return;
       }
+      allowEdit = false;
       var id = m.id === null ? newEditId() : m.id;
       var cur = m.id === null ? null : edits[id];
       if (m.neu === (cur ? cur.alt : m.alt)) {
@@ -233,20 +387,47 @@
       changed();
     }
 
-    /* Only well-formed stops are kept, and rects only for their keys, in a map
-       without a prototype. */
+    /* Rects only for the keys of the probe's stops, in a map without a prototype. */
+    function keepRects(rs) {
+      var map = Object.create(null);
+      for (var i = 0; i < stops.length; i++) {
+        var key = stops[i].key;
+        if (key.indexOf("lost:") === 0 || !Object.prototype.hasOwnProperty.call(rs, key)) continue;
+        var r = cleanRect(rs[key]);
+        if (r) map[key] = r;
+      }
+      return map;
+    }
+
+    /* Only well-formed stops are kept, and `found` only for items the state
+       holds. Decision 5 sets each current comment's drift; an item at step 0 is
+       lost, and gets a pill and a stop after the probe's stops. */
     function onDrawn(m) {
       if (!Array.isArray(m.stops)) return;
-      var list = [], map = Object.create(null), rs = m.rects && typeof m.rects === "object" ? m.rects : {};
-      for (var i = 0; i < m.stops.length; i++) {
+      var list = [], i, fm = m.found && typeof m.found === "object" ? m.found : {};
+      for (i = 0; i < m.stops.length; i++) {
         var s = m.stops[i];
         if (!s || !isStr(s.key) || (s.kind !== "comment" && s.kind !== "edit")) continue;
         list.push({key: s.key, kind: s.kind});
-        var r = Object.prototype.hasOwnProperty.call(rs, s.key) ? cleanRect(rs[s.key]) : null;
-        if (r) map[s.key] = r;
       }
+      var keys = itemKeys(), fd = Object.create(null), gone = [], drift = host.drift();
+      for (i = 0; i < keys.length; i++) {
+        var f = Object.prototype.hasOwnProperty.call(fm, keys[i]) ? fm[keys[i]] : null;
+        if (!f || typeof f !== "object" || [0, 1, 2, 3].indexOf(f.step) === -1 || !itemOf(keys[i])) continue;
+        fd[keys[i]] = {step: f.step, sel: isStr(f.sel) ? f.sel : "", adopted: f.adopted === true};
+        if (f.step === 0) gone.push(keys[i]);
+        if (keys[i].indexOf("m:") === 0) {
+          var id = keys[i].slice(2);
+          if (f.step === 1) delete drift[id];
+          else drift[id] = f.step === 0 ? "gone" : "moved";
+        }
+      }
+      for (i = 0; i < gone.length; i++) list.push({key: "lost:" + gone[i], kind: itemOf(gone[i]).kind});
       stops = list;
-      rects = map;
+      rects = keepRects(m.rects && typeof m.rects === "object" ? m.rects : {});
+      found = fd;
+      lost = gone;
+      renderLost();
       /* updatePrompt runs updateCounters, so the counters wake up as soon as
          the page has drawn. */
       host.updatePrompt();
@@ -268,6 +449,7 @@
         if (!isStr(m.path)) return;
         cancel(helloTimer);
         helloTimer = null;
+        allowEdit = false;
         up = true;
         onEntry = isEntryPath(m.path, env.entry);
         if (onEntry) {
@@ -287,6 +469,7 @@
       } else if (t === "bye") {
         cancel(helloTimer);
         helloTimer = null;
+        allowEdit = false;
         up = false;
         onEntry = false;
         due = true;
@@ -299,6 +482,13 @@
         host.updatePrompt();
       } else if (t === "drawn") {
         if (live()) onDrawn(m);
+      } else if (t === "rects") {
+        /* Boxes moved after a redraw; the stops stay as drawn. */
+        if (live() && m.rects && typeof m.rects === "object") rects = keepRects(m.rects);
+      } else if (t === "earlier-click") {
+        var er = cleanRect(m.rect), it = itemOf(m.key);
+        if (!live() || !er || !it || !it.earlier) return;
+        host.showEarlier(m.key, toShell(er, frameRect()));
       } else if (t === "select") {
         if (live()) onSelect(m);
       } else if (t === "mark-click") {
@@ -333,29 +523,43 @@
         if (live()) postDraw();
         else due = true;
       },
+      /* The probe's stops in page order, then the lost items; only those in
+         the counters' scope, as md's navTargets does. */
       stops: function (kind) {
         var out = [];
         for (var i = 0; i < stops.length; i++) {
+          if (!inScope(stops[i].key)) continue;
           if (kind === "all" || (kind === "comments" && stops[i].kind === "comment") ||
               (kind === "edits" && stops[i].kind === "edit")) out.push(stops[i].key);
         }
         return out;
       },
       rect: function (key) {
+        if (isStr(key) && key.indexOf("lost:") === 0) {
+          var pr = env.pillRect(key.slice(5));
+          if (pr) return pr;
+        }
         return toShell(rects[key] || {left: 0, top: 0, right: 0, bottom: 0}, frameRect());
       },
-      scrollTo: function (key) { env.post("scroll-to", {key: key}); },
+      scrollTo: function (key) {
+        if (isStr(key) && key.indexOf("lost:") === 0) env.pulsePill(key.slice(5));
+        else env.post("scroll-to", {key: key});
+      },
+      /* A lost item has nothing in the frame to light. */
       open: function (id) {
+        if (isStr(id) && id.indexOf("lost:") === 0) return;
         opened = true;
         env.post("open", {id: id});
       },
-      isEarlier: function () { return false; },
+      isEarlier: isEarlierKey,
+      /* shell.js's onScope calls this: the pills follow the counters' scope. */
+      rescope: renderLost,
       /* shell.js's closeBubble calls this, so a bubble closed from the shell
          side (Cancel, a click outside) un-lights the comment in the frame too. */
       closed: closed,
       /* The reviewer's choice is kept while away and comes back on the entry. */
       mode: function (m) {
-        if (chosen === "edit" && m !== "edit") leftEdit = now();
+        if (chosen === "edit" && m !== "edit") allowEdit = true;
         chosen = m;
         if (up) env.post("mode", {mode: effective()});
       }
@@ -418,6 +622,14 @@
 
     window.REVIEW_DOC_BACKEND = function (host) {
       var strip = document.getElementById("html-away");
+      var lostStrip = document.getElementById("html-lost");
+      var lostRow = lostStrip ? lostStrip.querySelector(".lost-pills") : null;
+      /* Compared by attribute, so an item key never has to be escaped into a selector. */
+      function pillFor(key) {
+        var bs = lostRow ? lostRow.children : [];
+        for (var i = 0; i < bs.length; i++) if (bs[i].getAttribute("data-key") === key) return bs[i];
+        return null;
+      }
       var back = document.getElementById("html-back");
       if (back) {
         back.textContent = "Back to " + entry;
@@ -437,6 +649,33 @@
           var span = strip.querySelector("span");
           if (span) span.textContent = awayText(path, entry);
           strip.hidden = false;
+        },
+        lost: function (pills, pick) {
+          if (!lostStrip || !lostRow) return;
+          lostRow.textContent = "";
+          pills.forEach(function (p) {
+            var b = document.createElement("button");
+            b.type = "button";
+            b.className = "lost-pill" + (p.earlier ? " earlier" : "");
+            b.setAttribute("data-key", p.key);
+            b.textContent = p.label;
+            b.addEventListener("click", function () { pick(p.key); });
+            lostRow.appendChild(b);
+          });
+          lostStrip.hidden = !pills.length;
+        },
+        pillRect: function (key) {
+          var b = pillFor(key);
+          return b ? b.getBoundingClientRect() : null;
+        },
+        /* The counters' step to a pill: the pill is always in view, so it only pulses. */
+        pulsePill: function (key) {
+          var b = pillFor(key);
+          if (!b) return;
+          b.classList.remove("is-target");
+          void b.offsetWidth;
+          b.classList.add("is-target");
+          setTimeout(function () { b.classList.remove("is-target"); }, 1500);
         }
       };
       current = createBackend(host, env);
