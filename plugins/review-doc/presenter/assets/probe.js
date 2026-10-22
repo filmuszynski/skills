@@ -496,6 +496,8 @@
   var pulseKey = null, pulseTimer = null;
   var redrawTimer = null;
   var lastScrollPost = 0;
+  var rectsPosted = {}, rectsNext = null, rectsTimer = null, lastRectsPost = 0;
+  var keySeq = 0;
   var touched = [];         /* elements whose original markup we saved (el.__rdOrig) */
   var pending = null, pendingSel = null;   /* last committed edit the shell has not named yet */
   var editing = null, startHTML = "", startText = "";
@@ -528,6 +530,7 @@
     } else if (m.type === "scroll-to") {
       scrollToStop(m.key);
     } else if (m.type === "open") {
+      /* A current item's id, or an earlier item's key (isOpen tells them apart). */
       openId = m.id == null ? null : m.id;
       redraw();
     } else if (m.type === "clear-selection") {
@@ -555,6 +558,11 @@
     ".run { background: rgba(240,132,78,.26); border-bottom: 2px solid #F0844E; }\n" +
     ".run.open { background: rgba(240,132,78,.45); }\n" +
     ".run.caret { background: #F0844E; border: 0; }\n" +
+    /* Earlier rounds: the tint of md's mark.prev-comment and mark.prev-edit, no line. */
+    ".prev-comment { background: rgba(217, 166, 46, .11); }\n" +
+    ".prev-comment.open { background: rgba(217, 166, 46, .2); }\n" +
+    ".prev-edit { background: rgba(240, 132, 78, .13); }\n" +
+    ".prev-edit.open { background: rgba(240, 132, 78, .24); }\n" +
     "@keyframes nav-pulse {\n" +
     "  0%   { box-shadow: 0 0 0 0 rgba(240, 132, 78, .55); }\n" +
     "  70%  { box-shadow: 0 0 0 10px rgba(240, 132, 78, 0); }\n" +
@@ -628,31 +636,83 @@
     return out;
   }
 
-  function redraw() {
+  /* Is this stop's item the one the shell has open? Current items are named by
+     id, earlier ones by their item key. */
+  function isOpen(s) {
+    if (openId == null) return false;
+    return s.earlier ? s.key === openId : s.id === openId;
+  }
+
+  /* Draws every stop and returns {stop key: first rect}. Earlier boxes go in
+     first, so a current box on the same words paints over them. `quiet` (from
+     onDraw) leaves the rects to the drawn message; otherwise a change in any
+     first rect is posted as `rects`. */
+  function redraw(quiet) {
     clearTimeout(redrawTimer);
     redrawTimer = null;
-    if (!drawnOnce) return;
+    if (!drawnOnce) return {};
     layer();
     var op = mode === "use" ? ".35" : "1";
     if (host.style.getPropertyValue("opacity") !== op) host.style.setProperty("opacity", op, "important");
     while (boxWrap.lastChild) boxWrap.removeChild(boxWrap.lastChild);
     boxes = [];
-    for (var i = 0; i < stops.length; i++) {
-      var s = stops[i], rs = rectsOf(s);
-      for (var j = 0; j < rs.length; j++) {
-        var r = rs[j], d = document.createElement("div");
-        d.className = "box " + (s.kind === "comment" ? "comment" : "run") +
-                      (s.caret ? " caret" : "") +
-                      (openId != null && s.id === openId ? " open" : "") +
-                      (pulseKey === s.key ? " is-target" : "");
-        d.style.left = r.left + "px";
-        d.style.top = r.top + "px";
-        d.style.width = (r.right - r.left) + "px";
-        d.style.height = (r.bottom - r.top) + "px";
-        boxWrap.appendChild(d);
-        boxes.push({key: s.key, kind: s.kind, id: s.id, n: s.n, rect: r});
+    var firsts = {}, pass, i, j;
+    for (pass = 0; pass < 2; pass++) {
+      for (i = 0; i < stops.length; i++) {
+        var s = stops[i], rs;
+        if (!!s.earlier !== (pass === 0)) continue;
+        rs = rectsOf(s);
+        if (rs.length) firsts[s.key] = rs[0];
+        for (j = 0; j < rs.length; j++) {
+          var r = rs[j], d = document.createElement("div");
+          d.className = "box " +
+                        (s.earlier ? (s.kind === "comment" ? "prev-comment" : "prev-edit")
+                                   : (s.kind === "comment" ? "comment" : "run")) +
+                        (s.caret ? " caret" : "") +
+                        (isOpen(s) ? " open" : "") +
+                        (pulseKey === s.key ? " is-target" : "");
+          d.style.left = r.left + "px";
+          d.style.top = r.top + "px";
+          d.style.width = (r.right - r.left) + "px";
+          d.style.height = (r.bottom - r.top) + "px";
+          boxWrap.appendChild(d);
+          boxes.push({key: s.key, kind: s.kind, id: s.id, n: s.n, earlier: !!s.earlier, rect: r});
+        }
       }
     }
+    if (quiet !== true) postRects(firsts);
+    return firsts;
+  }
+
+  function sameRects(a, b) {
+    var k;
+    for (k in a) {
+      var x = a[k], y = b[k];
+      if (!y || x.left !== y.left || x.top !== y.top || x.right !== y.right || x.bottom !== y.bottom) return false;
+    }
+    for (k in b) if (!(k in a)) return false;
+    return true;
+  }
+
+  /* The shell keeps the first rect of every stop to place its bubbles. After a
+     redraw that moved any of them, send the new set: at most one message per
+     200 ms, and the last change in a burst is always sent. */
+  function postRects(firsts) {
+    rectsNext = firsts;
+    if (rectsTimer) return;   /* the trailing call will send the newest set */
+    if (sameRects(firsts, rectsPosted)) return;
+    var wait = 200 - (Date.now() - lastRectsPost);
+    if (wait <= 0) flushRects();
+    else rectsTimer = setTimeout(flushRects, wait);
+  }
+
+  function flushRects() {
+    clearTimeout(rectsTimer);
+    rectsTimer = null;
+    if (!rectsNext || sameRects(rectsNext, rectsPosted)) return;
+    lastRectsPost = Date.now();
+    rectsPosted = rectsNext;
+    post("rects", {rects: rectsNext});
   }
 
   /* Coalesced: a burst of scroll, resize or DOM changes costs one redraw. */
@@ -749,11 +809,63 @@
     return null;
   }
 
+  /* A stable name for an element within this page load, for the claims. */
+  function keyOf(el) {
+    if (!el.__rdKey) el.__rdKey = ++keySeq;
+    return String(el.__rdKey);
+  }
+
+  /* The live document as the lookup helpers see it, built once per draw. The
+     body's flat text is kept for the draw, since step 3 reads it for every mark;
+     `settle` drops it after the rewrites have changed the page. */
+  function liveEnv() {
+    var bodyFlat = null, env = {
+      bySel: bySel,
+      byTag: function (name) {
+        return Array.prototype.slice.call(document.getElementsByTagName(name));
+      },
+      body: document.body,
+      flatOf: function (el) {
+        if (el !== document.body) return flatText(el);
+        if (!bodyFlat) bodyFlat = flatText(el);
+        return bodyFlat;
+      },
+      origOf: function (el) {
+        return el.__rdOrig === undefined ? null : origFlat(el);
+      },
+      keyOf: keyOf,
+      idInUse: idInUse,
+      settle: function () { bodyFlat = null; }
+    };
+    return env;
+  }
+
+  /* [start, end] of one entry of `offs`, which the channel sends as pairs;
+     runOffsets' own {s, e} shape is read too. */
+  function offPair(o) {
+    if (!o) return null;
+    if (o.length === 2) return [o[0], o[1]];
+    if (typeof o.s === "number") return [o.s, o.e];
+    return null;
+  }
+
+  /* Live ranges over every `offs` range of the flat text, in order. */
+  function offPieces(flat, offs) {
+    var out = [], i;
+    for (i = 0; i < (offs || []).length; i++) {
+      var o = offPair(offs[i]);
+      if (o && o[1] > o[0]) out = out.concat(piecesFor(flat, o[0], o[1]));
+    }
+    return out;
+  }
+
   /* Decision 10 for every stored edit, plus naming the last commit (decision 11)
-     and putting back elements whose edit left the state (undo, reset). Returns
-     [{edit, el}] for the edits whose element was found. */
-  function applyEdits(edits) {
-    var ids = {}, i, found = [];
+     and putting back elements whose edit left the state (undo, reset). The host
+     element comes from findEdit (decision 4), whose claims live in `claimed` for
+     the whole draw. Records each edit in `found` and returns [{edit, el, adopted}]
+     for the edits whose element was found. */
+  function applyEdits(edits, env, claimed, found) {
+    var ids = {}, i, j, out = [];
     for (i = 0; i < edits.length; i++) ids[edits[i].id] = true;
     if (pending) {
       for (i = 0; i < edits.length; i++) {
@@ -772,42 +884,88 @@
       }
     }
     for (i = 0; i < edits.length; i++) {
-      var ed = edits[i], el = idInUse(ed.id);
-      if (!el) {
-        el = bySel(ed.sel);
-        if (el && el.__rdEdit && ids[el.__rdEdit] && el.__rdEdit !== ed.id) el = null;
-        if (el) {
-          saveOrig(el);
-          el.__rdEdit = ed.id;
+      var ed = edits[i], key = "e:" + ed.id, f = findEdit(ed, env, claimed);
+      if (!f) {
+        found[key] = {step: 0, sel: ed.sel};
+        continue;
+      }
+      var el = f.el;
+      /* The rewrite now hangs on this element: no other one may still carry it. */
+      for (j = 0; j < touched.length; j++) {
+        var o = touched[j];
+        if (o !== el && o.__rdEdit === ed.id) {
+          o.__rdEdit = null;
+          if (o !== editing && o.innerHTML !== o.__rdOrig) o.innerHTML = o.__rdOrig;
         }
       }
-      if (!el) continue;
-      if (el !== editing && flatText(el).text !== ed.neu) {
-        if (el.innerHTML !== el.__rdOrig) el.innerHTML = el.__rdOrig;
-        if (flatText(el).text !== ed.alt) continue;   /* the page changed under us */
-        if (ed.fine) retext(el, ed.fine);
-        else el.textContent = ed.neu;   /* no runs (diff refused): plain text is all we have */
+      saveOrig(el);
+      el.__rdEdit = ed.id;
+      if (el !== editing) {
+        if (f.adopted) {
+          /* The page's own markup already reads `neu`: show it as it is. */
+          if (el.innerHTML !== el.__rdOrig) el.innerHTML = el.__rdOrig;
+        } else if (flatText(el).text !== ed.neu) {
+          if (el.innerHTML !== el.__rdOrig) el.innerHTML = el.__rdOrig;
+          if (flatText(el).text !== ed.alt) {   /* the page changed under us */
+            found[key] = {step: 0, sel: ed.sel};
+            continue;
+          }
+          if (ed.fine) retext(el, ed.fine);
+          else el.textContent = ed.neu;   /* no runs (diff refused): plain text is all we have */
+        }
       }
-      found.push({edit: ed, el: el});
+      found[key] = {step: f.step, sel: selectorFor(el)};
+      if (f.adopted) found[key].adopted = true;
+      out.push({edit: ed, el: el, adopted: f.adopted});
     }
-    return found;
+    return out;
   }
 
-  function markStop(mk) {
-    var el = bySel(mk.sel);
-    if (!el || !mk.quote) return null;
-    var flat = flatText(el), at = nthIndex(flat.text, mk.quote, mk.occ || 0);
-    if (at === -1) at = flat.text.indexOf(mk.quote);
-    if (at === -1) return null;
-    var pieces = piecesFor(flat, at, at + mk.quote.length);
+  /* A comment's stop, wherever findMark puts it now (decision 3). An earlier
+     round's comment is keyed by its item key and drawn as tint. */
+  function markStop(mk, env, found, earlier) {
+    var key = earlier ? mk.key : "m:" + mk.id, f = findMark(mk, env);
+    if (!f) {
+      found[key] = {step: 0, sel: mk.sel};
+      return null;
+    }
+    found[key] = {step: f.step, sel: selectorFor(f.el)};
+    var pieces = piecesFor(env.flatOf(f.el), f.at, f.at + mk.quote.length);
     if (!pieces.length) return null;
-    return {key: "m:" + mk.id, kind: "comment", id: mk.id, n: 0, first: pieces[0], pieces: pieces};
+    var st = {key: key, kind: "comment", id: mk.id, n: 0, first: pieces[0], pieces: pieces};
+    if (earlier) st.earlier = true;
+    return st;
+  }
+
+  /* An earlier round's rewrite: one tinted stop over all its runs, keyed by the
+     item key, on the element that shows `neu` now. When that element is being
+     rewritten again, its text no longer matches `offs`: the item is listed as
+     lost, so it stays reachable from its pill. */
+  function earlierEditStop(ed, env, claimed, found) {
+    var f = findEarlierEdit(ed, env, claimed), flat = f ? env.flatOf(f.el) : null;
+    if (!f || flat.text !== ed.neu) {
+      found[ed.key] = {step: 0, sel: ed.sel};
+      return null;
+    }
+    found[ed.key] = {step: f.step, sel: selectorFor(f.el)};
+    var pieces = offPieces(flat, ed.offs);
+    if (!pieces.length) return null;
+    return {key: ed.key, kind: "edit", n: 0, first: pieces[0], pieces: pieces, earlier: true};
   }
 
   /* One stop per changed run of the coalesced runs, placed over the shown (neu)
-     text: added words get the underline, a pure deletion gets a caret. */
-  function editStops(ed, el) {
+     text: added words get the underline, a pure deletion gets a caret. A rewrite
+     the page already carries (adopted) has no runs of ours to follow; it gets one
+     stop per `offs` range instead. */
+  function editStops(ed, el, adopted) {
     var flat = flatText(el), out = [], p = 0, n = 0, i;
+    if (adopted) {
+      for (i = 0; i < (ed.offs || []).length; i++) {
+        var ps = offPieces(flat, [ed.offs[i]]);
+        if (ps.length) out.push({key: "e:" + ed.id + ":" + i, kind: "edit", id: ed.id, n: i, first: ps[0], pieces: ps});
+      }
+      return out;
+    }
     var runs = ed.runs || [{same: false, added: flat.text, removed: ed.alt}];
     for (i = 0; i < runs.length; i++) {
       var r = runs[i];
@@ -828,15 +986,29 @@
     return out;
   }
 
+  /* The whole state, drawn afresh: current rewrites applied first (they change
+     the page), then current comments, then the earlier rounds as tint. One env
+     and one set of claims serve the whole draw. `drawn` names every item's
+     lookup step in `found`. */
   function onDraw(msg) {
     lastDraw = msg;
-    var marks = msg.marks || [], edits = msg.edits || [], i, next = [];
-    var found = applyEdits(edits);
+    var marks = msg.marks || [], edits = msg.edits || [], earlier = msg.earlier || [];
+    var env = liveEnv(), claimed = {}, found = {}, next = [], i, st;
+    var applied = applyEdits(edits, env, claimed, found);
+    env.settle();
     for (i = 0; i < marks.length; i++) {
-      var ms = markStop(marks[i]);
-      if (ms) next.push(ms);
+      st = markStop(marks[i], env, found);
+      if (st) next.push(st);
     }
-    for (i = 0; i < found.length; i++) next = next.concat(editStops(found[i].edit, found[i].el));
+    for (i = 0; i < applied.length; i++) {
+      next = next.concat(editStops(applied[i].edit, applied[i].el, applied[i].adopted));
+    }
+    for (i = 0; i < earlier.length; i++) {
+      var it = earlier[i];
+      if (!it || !it.key) continue;
+      st = it.kind === "edit" ? earlierEditStop(it, env, claimed, found) : markStop(it, env, found, true);
+      if (st) next.push(st);
+    }
     next.sort(function (a, b) {
       try {
         return a.first.compareBoundaryPoints(Range.START_TO_START, b.first);
@@ -846,14 +1018,18 @@
     });
     stops = next;
     drawnOnce = true;
-    redraw();
-    var list = [], rects = {};
+    var rects = redraw(true), list = [];
     for (i = 0; i < stops.length; i++) {
-      list.push({key: stops[i].key, kind: stops[i].kind});
-      var rs = rectsOf(stops[i]);
-      if (rs.length) rects[stops[i].key] = rs[0];
+      var entry = {key: stops[i].key, kind: stops[i].kind};
+      if (stops[i].earlier) entry.earlier = true;
+      list.push(entry);
     }
-    post("drawn", {stops: list, rects: rects});
+    /* `drawn` carries the rects; a pending `rects` from the old stops is moot. */
+    clearTimeout(rectsTimer);
+    rectsTimer = null;
+    rectsNext = null;
+    rectsPosted = rects;
+    post("drawn", {stops: list, rects: rects, found: found});
   }
 
   function scrollToStop(key) {
@@ -881,8 +1057,11 @@
     if (mode !== "comment" || editing) return;
     var s = window.getSelection();
     if (!s || s.isCollapsed || !s.rangeCount || !document.body) return;
-    var range = s.getRangeAt(0);
+    /* A copy, so pulling a triple click's end back (decision 13) leaves the
+       reader's own selection as it is. */
+    var range = s.getRangeAt(0).cloneRange();
     if (!inside(range.commonAncestorContainer, document.body)) return;
+    pullEndBack(range);
     var anchor = passageAnchor(range.commonAncestorContainer);
     if (!anchor) return;
     var flat = flatText(anchor);
@@ -906,12 +1085,18 @@
     });
   }
 
+  /* The box under a point. A current box wins over an earlier box at the same
+     spot, since the current item is the one the reviewer can still change. */
   function hit(x, y) {
+    var prev = null;
     for (var i = boxes.length - 1; i >= 0; i--) {
       var r = boxes[i].rect;
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return boxes[i];
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+        if (!boxes[i].earlier) return boxes[i];
+        if (!prev) prev = boxes[i];
+      }
     }
-    return null;
+    return prev;
   }
 
   function commentClick(ev) {
@@ -919,7 +1104,8 @@
     if (s && !s.isCollapsed) return;   /* the mouseup just made a selection */
     var b = hit(ev.clientX, ev.clientY);
     if (!b) return;
-    if (b.kind === "comment") post("mark-click", {id: b.id, rect: plainRect(b.rect)});
+    if (b.earlier) post("earlier-click", {key: b.key, rect: plainRect(b.rect)});
+    else if (b.kind === "comment") post("mark-click", {id: b.id, rect: plainRect(b.rect)});
     else post("run-click", {id: b.id, n: b.n, rect: plainRect(b.rect)});
   }
 
@@ -1026,6 +1212,13 @@
 
   function onFocusOut(ev) {
     if (editing && ev.target === editing) commit();
+  }
+
+  /* Leaving the page (a link, a reload) must not lose what was typed: an open
+     edit is committed before the shell hears `bye` (decision 12). */
+  function onPageHide() {
+    if (editing) commit();
+    post("bye");
   }
 
   /* ------------------------------------------------------------- the events */
@@ -1158,7 +1351,7 @@
   window.addEventListener("mouseup", onMouseUp, true);
   window.addEventListener("scroll", onScroll, {capture: true, passive: true});
   window.addEventListener("resize", soon);
-  window.addEventListener("pagehide", function () { post("bye"); });
+  window.addEventListener("pagehide", onPageHide);
   new MutationObserver(onMutations).observe(document.documentElement,
     {subtree: true, childList: true, characterData: true, attributes: true});
 

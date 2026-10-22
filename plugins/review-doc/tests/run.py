@@ -2718,6 +2718,50 @@ def test_pull_end_back_on_triple_click():
 
 
 @test
+def test_probe_draw_reports_found():
+    od = js_function("onDraw", asset="probe.js")
+    assert "found" in od and "earlier" in od, od
+    assert '"drawn"' in od and "found: found" in od
+    assert "findMark(" in js_function("markStop", asset="probe.js")
+    assert "findEdit(" in js_function("applyEdits", asset="probe.js")
+    assert "findEarlierEdit(" in shell._asset("probe.js").split("function onDraw(")[0]
+
+
+@test
+def test_probe_posts_rects_throttled():
+    rd = js_function("redraw", asset="probe.js")
+    assert "postRects(" in rd, rd
+    pr = js_function("postRects", asset="probe.js")
+    fl = js_function("flushRects", asset="probe.js")
+    assert '"rects"' in pr + fl
+    assert "200" in pr
+
+
+@test
+def test_probe_earlier_click():
+    cc = js_function("commentClick", asset="probe.js")
+    assert '"earlier-click"' in cc, cc
+    h = js_function("hit", asset="probe.js")
+    assert "earlier" in h, "a current box wins over an earlier one"
+
+
+@test
+def test_probe_pagehide_commits_first():
+    js = shell._asset("probe.js")
+    assert 'window.addEventListener("pagehide", onPageHide)' in js
+    ph = js_function("onPageHide", asset="probe.js")
+    assert "commit(" in ph and 'post("bye"' in ph
+    assert ph.index("commit(") < ph.index('post("bye"'), ph
+
+
+@test
+def test_probe_selection_pulls_end_back():
+    cs = js_function("checkSelection", asset="probe.js")
+    assert "pullEndBack(" in cs and "passageAnchor(" in cs
+    assert cs.index("pullEndBack(") < cs.index("passageAnchor("), cs
+
+
+@test
 def test_flat_index_memo_agrees():
     src = js_function("flatIndex", "probe.js")
     old = (src[:src.index("    if (node.nodeType === 3 && flat.first")] +
