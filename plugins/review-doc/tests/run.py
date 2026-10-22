@@ -2665,10 +2665,14 @@ var env = {entry: "index.html",
   post: function (type, f) { posts.push([type, f || {}]); },
   frameRect: function () { return {left: 10, top: 20, right: 810, bottom: 620}; },
   enable: function (on) { enabled = on; },
-  away: function (p) { awayAt = p; }};
+  away: function (p) { awayAt = p; },
+  later: function (fn, ms) { timers.push([fn, ms]); return timers.length; },
+  cancel: function (h) { if (h) timers[h - 1] = null; }};
+var timers = [];
 var b;
 """ % json.dumps(data or {"marks": {}, "edits": {}})
-    fns = RUN_FNS + [("isEntryPath", SH), ("revertedText", SH), ("toShell", SH),
+    fns = RUN_FNS + [("isEntryPath", SH), ("revertedText", SH), ("toShell", SH), ("isStr", SH),
+                     ("isNum", SH), ("own", SH), ("cleanRect", SH), ("cleanAnchor", SH),
                      ("newEditId", SH), ("createBackend", SH)]
     return run_js(fns, "(function () { b = createBackend(host, env); %s })()" % expr, pre)
 
@@ -2676,7 +2680,7 @@ var b;
 @test
 def test_html_backend_has_the_seam_methods():
     out = _backend_run("return Object.keys(b.backend).sort();")
-    assert out == sorted("draw stops rect scrollTo open isEarlier mode".split()), out
+    assert out == sorted("draw stops rect scrollTo open isEarlier mode closed".split()), out
     out = _backend_run("return [b.backend.isEarlier(), b.backend.stops('all').length];")
     assert out == [False, 0], out
 
@@ -2717,7 +2721,8 @@ def test_drawn_refreshes_the_counters():
     on = js_function("createBackend", SH)
     seg = on[on.index('t === "drawn"'):]
     seg = seg[:seg.index("} else if")]
-    assert "host.updatePrompt()" in seg, seg
+    assert "onDrawn(m)" in seg, seg
+    assert "host.updatePrompt()" in fn_body_run(on, "onDrawn")
 
 
 @test
@@ -2777,13 +2782,126 @@ b.receive({rd: 1, type: "key", key: "Escape"});
 b.receive({rd: 1, type: "down"});
 b.receive({rd: 1, type: "mark-click", id: "m1", rect: {left: 0, top: 5, right: 1, bottom: 6}});
 b.receive({rd: 1, type: "select", quote: "two", occ: 0, rect: {left: 3, top: 0, right: 4, bottom: 1},
-           anchor: {sel: "#a"}});
+           anchor: {sel: "#a", tag: "<p>", text: "t", before: "", after: ""}});
 b.receive({rd: 2, type: "down"});
 b.receive({rd: 1, type: "nope"});
 return [calls, posts.slice(-1)[0][0]];""", data)
     assert out[0] == [["undo"], ["redo"], ["redo"], ["closeBubble"], ["closeBubble"],
                       ["showComment", "m1", 25], ["ask", "two", 13, "#a"]], out[0]
     assert out[1] == "clear-selection", out
+
+
+HOSTILE_DATA = {"marks": {"m1": {"sec": "", "quote": "one", "occ": 0, "sel": "p", "comment": "x"}},
+                "edits": {"h1": {"sec": "", "alt": "a b", "neu": "a c", "sel": "p", "tag": "<p>", "text": "a b"}}}
+HELLO = 'b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});'
+SNAP = ('JSON.stringify(state.data) + "|" + JSON.stringify(Object.prototype) + "|" + '
+        '(({}).alt === undefined) + "|" + Object.keys(state.data.edits).join(",")')
+
+
+@test
+def test_html_backend_edit_rejects_unknown_and_proto_ids():
+    out = _backend_run(HELLO + """
+var before = %s;
+var anchor = {sel: "p", tag: "<p>", text: "a b"};
+["__proto__", "constructor", "prototype", "h-unknown", 5, {}].forEach(function (id) {
+  b.receive({rd: 1, type: "edit", id: id, alt: "a b", neu: "zzz", anchor: anchor});
+});
+b.receive({rd: 1, type: "edit", id: null, alt: 1, neu: "zzz", anchor: anchor});
+b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: "zzz", anchor: {sel: 1, tag: "<p>", text: ""}});
+return [before === %s, calls.filter(function (c) { return c[0] === "save"; }).length];""" % (SNAP, SNAP),
+        HOSTILE_DATA)
+    assert out == [True, 0], out
+
+
+@test
+def test_html_backend_clicks_reject_unknown_and_proto_ids():
+    out = _backend_run(HELLO + """
+var rect = {left: 0, top: 0, right: 1, bottom: 1};
+["__proto__", "constructor", "nope", 3].forEach(function (id) {
+  b.receive({rd: 1, type: "run-click", id: id, n: 0, rect: rect});
+  b.receive({rd: 1, type: "mark-click", id: id, rect: rect});
+});
+b.receive({rd: 1, type: "run-click", id: "h1", n: "0", rect: rect});
+b.receive({rd: 1, type: "mark-click", id: "m1", rect: {left: "0", top: 0, right: 1, bottom: 1}});
+b.receive({rd: 1, type: "mark-click", id: "m1", rect: {left: NaN, top: 0, right: 1, bottom: 1}});
+var bad = calls.slice();
+b.receive({rd: 1, type: "mark-click", id: "m1", rect: rect});
+return [bad, calls.slice(-1)[0][0]];""", HOSTILE_DATA)
+    assert out == [[], "showComment"], out
+
+
+@test
+def test_html_backend_select_passes_only_the_five_anchor_fields():
+    out = _backend_run(HELLO + """
+var got = null;
+host.ask = function (c) { got = c; };
+b.receive({rd: 1, type: "select", quote: "q", occ: 0, rect: {left: 0, top: 0, right: 1, bottom: 1},
+           anchor: {sel: "p", tag: "<p>", text: "t", before: "b", after: "a", comment: "evil", sec: "x"}});
+var first = got && Object.keys(got.extra).sort();
+got = null;
+b.receive({rd: 1, type: "select", quote: "q", occ: "0", rect: {left: 0, top: 0, right: 1, bottom: 1},
+           anchor: {sel: "p", tag: "<p>", text: "t", before: "b", after: "a"}});
+var badOcc = got;
+b.receive({rd: 1, type: "select", quote: "q", occ: 0, rect: {left: 0, top: 0, right: 1, bottom: 1},
+           anchor: {sel: "p", tag: "<p>", text: "t", before: "b"}});
+return [first, badOcc, got];""")
+    assert out == [["after", "before", "sel", "tag", "text"], None, None], out
+
+
+@test
+def test_html_backend_drawn_is_sanitised():
+    out = _backend_run(HELLO + """
+b.receive({rd: 1, type: "drawn", stops: [{key: "__proto__", kind: "comment"}, {key: 1, kind: "edit"},
+  {key: "m:m1", kind: "evil"}, null, {key: "e:h1:0", kind: "edit"}],
+  rects: {"__proto__": {left: 1, top: 1, right: 1, bottom: 1}, "e:h1:0": {left: "x", top: 0, right: 0, bottom: 0}}});
+return [b.backend.stops("all"), b.backend.rect("__proto__"), b.backend.rect("e:h1:0"), ({}).left === undefined];""")
+    zero = {"left": 10, "top": 20, "right": 10, "bottom": 20}
+    assert out == [["__proto__", "e:h1:0"], zero, zero, True], out
+
+
+@test
+def test_html_backend_closed_unlights():
+    out = _backend_run(HELLO + """
+var n = posts.length;
+b.backend.closed();
+var idle = posts.length - n;
+b.backend.open("m1");
+b.backend.closed();
+return [idle, posts.slice(-2)];""")
+    assert out == [0, [["open", {"id": "m1"}], ["open", {"id": None}]]], out
+    cb = js_function("closeBubble")
+    assert "if (backend && backend.closed) backend.closed();" in cb
+
+
+@test
+def test_html_backend_escape_clears_an_asked_selection():
+    out = _backend_run(HELLO + """
+host.ask = function (c) { calls.push(["ask"]); };
+b.receive({rd: 1, type: "select", quote: "q", occ: 0, rect: {left: 0, top: 0, right: 1, bottom: 1},
+           anchor: {sel: "p", tag: "<p>", text: "t", before: "", after: ""}});
+b.receive({rd: 1, type: "key", key: "Escape"});
+var first = posts.slice(-1)[0][0];
+var n = posts.length;
+b.receive({rd: 1, type: "key", key: "Escape"});
+return [first, posts.length - n, calls.map(function (c) { return c[0]; })];""")
+    assert out == ["clear-selection", 0, ["ask", "closeBubble", "closeBubble"]], out
+
+
+@test
+def test_html_backend_no_hello_shows_another_page():
+    out = _backend_run("""
+b.loaded();
+var t1 = timers.slice();
+timers[0][0]();
+var after = [awayAt, enabled];
+b.loaded();
+b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});
+var cancelled = timers[1] === null;
+return [t1.length, t1[0][1], after, cancelled, awayAt, enabled];""")
+    assert out == [1, 1500, ["", False], True, None, True], out
+    txt = run_js(["awayText"], '[awayText("", "index.html"), awayText("/my%20page.html", "index.html")]', asset=SH)
+    assert txt == ["You are on another page. Comments and rewrites only work on index.html.",
+                   "You are on /my page.html. Comments and rewrites only work on index.html."], txt
 
 
 @test

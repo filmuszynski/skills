@@ -35,6 +35,17 @@
     return p === "/" || p === "/" + entry;
   }
 
+  /* The away strip. An empty path is a document that never said hello. */
+  function awayText(path, entry) {
+    var shown = path || "another page";
+    try {
+      if (path) shown = decodeURIComponent(path);
+    } catch (e) {
+      shown = path;
+    }
+    return "You are on " + shown + ". Comments and rewrites only work on " + entry + ".";
+  }
+
   /* The text with changed run n put back as it was and every other run kept.
      Runs are the coalesced ones, the same the edits counter counts. */
   function revertedText(runs, n) {
@@ -54,6 +65,35 @@
             right: rect.right + frameRect.left, bottom: rect.bottom + frameRect.top};
   }
 
+  /* Messages from the frame are untrusted: the reviewed page's own scripts share
+     the probe's window, pass the source and origin checks, and can post
+     {rd: 1, ...} too. So every field is type-checked, and an id only ever
+     indexes state when it is already an own key of that map (no __proto__). */
+  function isStr(v) { return typeof v === "string"; }
+
+  function isNum(v) { return typeof v === "number" && isFinite(v); }
+
+  function own(map, id) {
+    return isStr(id) && !!map && Object.prototype.hasOwnProperty.call(map, id);
+  }
+
+  function cleanRect(r) {
+    if (!r || typeof r !== "object") return null;
+    if (!isNum(r.left) || !isNum(r.top) || !isNum(r.right) || !isNum(r.bottom)) return null;
+    return {left: r.left, top: r.top, right: r.right, bottom: r.bottom};
+  }
+
+  /* A fresh object with only the five anchor fields, or null when one is not a string. */
+  function cleanAnchor(a) {
+    if (!a || typeof a !== "object") return null;
+    var out = {}, keys = ["sel", "tag", "text", "before", "after"];
+    for (var i = 0; i < keys.length; i++) {
+      if (!isStr(a[keys[i]])) return null;
+      out[keys[i]] = a[keys[i]];
+    }
+    return out;
+  }
+
   function newEditId() {
     return "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
@@ -66,8 +106,14 @@
      draw: the counters and the prompt count state, not stops (decision 8). */
   function createBackend(host, env) {
     var chosen = host.state.mode || "use";
-    var up = false, onEntry = false, due = true, opened = false;
-    var stops = [], rects = {};
+    var up = false, onEntry = false, due = true, opened = false, asking = false;
+    var stops = [], rects = Object.create(null), helloTimer = null;
+    var later = env.later || function (fn, ms) { return setTimeout(fn, ms); };
+    var cancel = env.cancel || function (h) { clearTimeout(h); };
+
+    /* A document without a probe (a PDF, an image, a page we could not inject)
+       never says hello; after this long the strip says so. */
+    var HELLO_WAIT = 1500;
 
     function frameRect() { return env.frameRect(); }
 
@@ -92,16 +138,20 @@
 
     function forget() {
       stops = [];
-      rects = {};
+      rects = Object.create(null);
     }
 
     /* A bubble that lit a comment in the frame lets it go when it closes. */
-    function closeBubble() {
-      host.closeBubble();
+    function closed() {
       if (opened) {
         opened = false;
         env.post("open", {id: null});
       }
+    }
+
+    function closeBubble() {
+      host.closeBubble();
+      closed();
     }
 
     function changed() {
@@ -110,9 +160,10 @@
     }
 
     function onRunClick(m) {
+      var r = cleanRect(m.rect);
+      if (!own(host.state.data.edits, m.id) || !isNum(m.n) || !r) return;
       var ed = host.state.data.edits[m.id];
-      if (!ed) return;
-      var id = m.id, rect = toShell(m.rect, frameRect());
+      var id = m.id, rect = toShell(r, frameRect());
       var runs = host.runs(ed.alt, ed.neu);
       if (!runs) {
         /* The diff was refused, so the probe drew the whole text as one run. */
@@ -132,8 +183,8 @@
       if (!run) return;
       var n = m.n;
       host.showChange(rect, run.removed, run.added, "This change", "Revert this", function () {
+        if (!own(host.state.data.edits, id)) return;
         var cur = host.state.data.edits[id];
-        if (!cur) return;
         var text = revertedText(host.runs(cur.alt, cur.neu) || runs, n);
         if (text === cur.alt) delete host.state.data.edits[id];
         else cur.neu = text;
@@ -145,9 +196,18 @@
     /* Decision 11: a new element gets its id here; the next draw carries it with
        the selector, and the probe names the element it is holding from that. */
     function onEdit(m) {
-      var edits = host.state.data.edits, a = m.anchor || {};
-      var id = m.id == null ? newEditId() : m.id;
-      var cur = edits[id];
+      var edits = host.state.data.edits, a = m.anchor;
+      if (!isStr(m.alt) || !isStr(m.neu)) return;
+      if (!a || typeof a !== "object" || !isStr(a.sel) || !isStr(a.tag) || !isStr(a.text)) return;
+      /* Only null makes a new id. An id the shell does not hold (or one that
+         names the prototype) changes nothing; the probe forgets ids that leave
+         the state on its next draw, so it is sent the state as it stands. */
+      if (m.id !== null && !own(edits, m.id)) {
+        postDraw();
+        return;
+      }
+      var id = m.id === null ? newEditId() : m.id;
+      var cur = m.id === null ? null : edits[id];
       if (m.neu === (cur ? cur.alt : m.alt)) {
         delete edits[id];
       } else if (cur) {
@@ -159,12 +219,43 @@
       changed();
     }
 
+    /* Only well-formed stops are kept, and rects only for their keys, in a map
+       without a prototype. */
+    function onDrawn(m) {
+      if (!Array.isArray(m.stops)) return;
+      var list = [], map = Object.create(null), rs = m.rects && typeof m.rects === "object" ? m.rects : {};
+      for (var i = 0; i < m.stops.length; i++) {
+        var s = m.stops[i];
+        if (!s || !isStr(s.key) || (s.kind !== "comment" && s.kind !== "edit")) continue;
+        list.push({key: s.key, kind: s.kind});
+        var r = Object.prototype.hasOwnProperty.call(rs, s.key) ? cleanRect(rs[s.key]) : null;
+        if (r) map[s.key] = r;
+      }
+      stops = list;
+      rects = map;
+      /* updatePrompt runs updateCounters, so the counters wake up as soon as
+         the page has drawn. */
+      host.updatePrompt();
+    }
+
+    function onSelect(m) {
+      var r = cleanRect(m.rect), extra = cleanAnchor(m.anchor);
+      if (!isStr(m.quote) || !isNum(m.occ) || !r || !extra) return;
+      host.ask({sec: "", quote: m.quote, occ: m.occ, rect: toShell(r, frameRect()),
+                clear: function () { asking = false; env.post("clear-selection"); }, extra: extra});
+      /* Set after ask: opening the bubble first closes any other one. */
+      asking = true;
+    }
+
     function receive(m) {
       if (!m || typeof m !== "object" || m.rd !== 1) return;
       var t = m.type;
       if (t === "hello") {
+        if (!isStr(m.path)) return;
+        cancel(helloTimer);
+        helloTimer = null;
         up = true;
-        onEntry = isEntryPath(String(m.path || ""), env.entry);
+        onEntry = isEntryPath(m.path, env.entry);
         if (onEntry) {
           env.away(null);
           env.enable(true);
@@ -176,42 +267,48 @@
           forget();
           env.post("mode", {mode: "use"});
           env.enable(false);
-          env.away(String(m.path || ""));
+          env.away(m.path);
           host.updatePrompt();
         }
       } else if (t === "bye") {
+        cancel(helloTimer);
+        helloTimer = null;
         up = false;
         onEntry = false;
         due = true;
         opened = false;
+        asking = false;
         forget();
         env.enable(false);
         env.away(null);
         host.closeBubble();
         host.updatePrompt();
       } else if (t === "drawn") {
-        if (!live()) return;
-        stops = m.stops || [];
-        rects = m.rects || {};
-        /* updatePrompt runs updateCounters, so the counters wake up as soon as
-           the page has drawn. */
-        host.updatePrompt();
+        if (live()) onDrawn(m);
       } else if (t === "select") {
-        if (!live()) return;
-        host.ask({sec: "", quote: m.quote, occ: m.occ || 0, rect: toShell(m.rect, frameRect()),
-                  clear: function () { env.post("clear-selection"); }, extra: m.anchor || {}});
+        if (live()) onSelect(m);
       } else if (t === "mark-click") {
-        if (!live()) return;
-        host.showComment(m.id, toShell(m.rect, frameRect()));
+        var r = cleanRect(m.rect);
+        if (!live() || !own(host.state.data.marks, m.id) || !r) return;
+        host.showComment(m.id, toShell(r, frameRect()));
       } else if (t === "run-click") {
         if (live()) onRunClick(m);
       } else if (t === "edit") {
         if (live()) onEdit(m);
       } else if (t === "key") {
-        if (m.key === "Escape") closeBubble();
-        else if (m.key === "z" && !m.shift) host.undo();
-        else if (m.key === "y" || m.key === "z") host.redo();
+        if (m.key === "Escape") {
+          /* An ask bubble closed this way also lets go of the frame's selection. */
+          var wasAsking = asking;
+          asking = false;
+          closeBubble();
+          if (wasAsking) env.post("clear-selection");
+        } else if (m.key === "z" && m.shift !== true) {
+          host.undo();
+        } else if (m.key === "y" || m.key === "z") {
+          host.redo();
+        }
       } else if (t === "down" || t === "scroll") {
+        asking = false;
         closeBubble();
       }
     }
@@ -239,6 +336,9 @@
         env.post("open", {id: id});
       },
       isEarlier: function () { return false; },
+      /* shell.js's closeBubble calls this, so a bubble closed from the shell
+         side (Cancel, a click outside) un-lights the comment in the frame too. */
+      closed: closed,
       /* The reviewer's choice is kept while away and comes back on the entry. */
       mode: function (m) {
         chosen = m;
@@ -254,7 +354,15 @@
         up = false;
         onEntry = false;
         due = true;
+        asking = false;
         forget();
+        cancel(helloTimer);
+        helloTimer = later(function () {
+          helloTimer = null;
+          if (up) return;
+          env.enable(false);
+          env.away("");   /* no path known: "another page" */
+        }, HELLO_WAIT);
         env.post("init", {mode: effective()});
       }
     };
@@ -311,10 +419,8 @@
         away: function (path) {
           if (!strip) return;
           if (path == null) { strip.hidden = true; return; }
-          var shown = path;
-          try { shown = decodeURIComponent(path); } catch (e) { /* keep it raw */ }
           var span = strip.querySelector("span");
-          if (span) span.textContent = "You are on " + shown + ". Comments and rewrites only work on " + entry + ".";
+          if (span) span.textContent = awayText(path, entry);
           strip.hidden = false;
         }
       };

@@ -1973,6 +1973,8 @@
        it is left alone: only closeFinish takes it down. */
     var open = doc.querySelectorAll(".is-open:not(.finish)");
     for (var i = 0; i < open.length; i++) open[i].classList.remove("is-open");
+    /* A frame backend lights comments inside its frame; the md one has no hook. */
+    if (backend && backend.closed) backend.closed();
   }
 
   function openBubble(anchorRect, build) {
