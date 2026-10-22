@@ -64,8 +64,11 @@ MARKDOWN = (".md", ".markdown")
 HTML = (".html", ".htm")
 SUPPORTED = "review-doc reviews Markdown files (.md, .markdown) and HTML pages (.html, .htm)."
 LOCAL_ONLY = "HTML review opens local files and localhost only."
-# Proxy mode (1.2 Phase 5) replaces this refusal with the real thing.
-NO_PROXY_YET = "Reviewing a running localhost dev server is not built yet."
+# Proxy mode (1.3) replaces this refusal with the real thing.
+NO_PROXY_YET = "Reviewing a dev server arrives in 1.3. Build or save the page and review the file."
+TOO_WIDE = ("HTML review shares the page's whole folder, so it does not open a page that sits "
+            "directly in your home folder or at the top of a drive. Move the page into a folder "
+            "of its own.")
 LOOPBACK = ("localhost", "127.0.0.1", "::1")
 URL_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 
@@ -107,6 +110,20 @@ def file_url_path(target):
     return url2pathname(u.path)
 
 
+def _home():
+    return os.path.expanduser("~")
+
+
+def _real(path):
+    return os.path.normcase(os.path.realpath(path))
+
+
+def folder_too_wide(folder):
+    """True when the frame would share the home folder or a filesystem root."""
+    f = _real(folder)
+    return os.path.dirname(f) == f or f == _real(_home())
+
+
 def check_html(target, slug=None):
     """Everything that can refuse an HTML render, checked before a server is started
     or a page written: the target, the slug, the setting."""
@@ -123,6 +140,8 @@ def check_html(target, slug=None):
         raise Unsupported(LOCAL_ONLY)
     if os.path.splitext(target)[1].lower() not in HTML:
         raise Unsupported(SUPPORTED)
+    if folder_too_wide(os.path.dirname(os.path.realpath(target))):
+        raise Unsupported(TOO_WIDE)
     if slug is not None and not pages.HTML_SLUG_RE.match(slug):
         raise ValueError("invalid slug %r for an HTML page: lowercase letters, digits and hyphens, "
                          "at most 63, no hyphen at either end" % slug)

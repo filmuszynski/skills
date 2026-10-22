@@ -213,7 +213,7 @@ def test_html_refusals():
     h = use_home(new_home())
     p = _copy_single(h)
     local = "HTML review opens local files and localhost only."
-    later = "Reviewing a running localhost dev server is not built yet."
+    later = "Reviewing a dev server arrives in 1.3. Build or save the page and review the file."
     for argv, msg in ((["html", "https://example.com/"], local),
                       (["html", "http://192.168.1.5:8080/"], local),
                       (["html", "http://localhost.evil.com/"], local),
@@ -234,6 +234,48 @@ def test_html_refusals():
     assert code == 2 and "--out" in res["error"], res
     code, res = _main_json(["html", os.path.join(h, "missing.html")])
     assert code == 1, res
+
+
+@test
+def test_home_folder_refused_however_spelled():
+    h = use_home(new_home())
+    f = os.path.join(h, "home")
+    os.makedirs(f)
+    p = os.path.join(f, "index.html")
+    shutil.copy(_fixture_path("site_single.html"), p)
+    homes = [f, f + os.sep]
+    if os.name == "nt":
+        homes.append(f.upper())
+    link = os.path.join(h, "home-link")
+    try:
+        os.symlink(f, link, target_is_directory=True)
+        homes.append(link)
+    except (OSError, NotImplementedError):
+        pass
+    for home in homes:
+        for target in (p, pathlib.Path(p).as_uri()):
+            with patch(build_screen, "_home", lambda home=home: home):
+                code, res = _main_json(["html", target])
+            assert code == 4 and res.get("message") == build_screen.TOO_WIDE, (home, target, code, res)
+
+
+@test
+def test_a_page_below_home_is_fine():
+    h = use_home(new_home())
+    p = _copy_single(h)  # <h>/site/index.html, one level below the patched home
+    with patch(build_screen, "_home", lambda: h), \
+            patch(build_screen.launch, "ensure_server", lambda *a, **k: (4321, None)):
+        code, res = _main_json(["html", p])
+    assert code == 0, res
+
+
+@test
+def test_filesystem_root_is_refused():
+    root = os.path.abspath(os.sep)
+    assert build_screen.folder_too_wide(root)
+    if os.name == "nt":
+        assert build_screen.folder_too_wide(os.path.splitdrive(os.getcwd())[0] + "\\")
+    assert not build_screen.folder_too_wide(os.path.join(root, "x"))
 
 
 @test
