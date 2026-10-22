@@ -42,6 +42,7 @@
   };
 
   /* Runtime only, never persisted. */
+  var backend = null;     // the anchor backend, chosen in start() (ADR 0019)
   var origHTML = {};      // editId -> pristine innerHTML
   var origText = {};      // editId -> pristine plain text
   var drift = {};         // markId -> "moved" | "section" | "lost", when the quote no longer matches exactly
@@ -587,6 +588,19 @@
   function applyDataToDoc() {
     /* History snapshots from before tables existed carry no map. */
     if (!state.data.tables) state.data.tables = {};
+    backend.draw();
+
+    /* Sections and steps share one decision map and one kind of control. */
+    var decs = docEl.querySelectorAll(".dec");
+    for (var i = 0; i < decs.length; i++) paintDecision(decs[i]);
+    var notes = docEl.querySelectorAll(".note-btn");
+    for (var j = 0; j < notes.length; j++) paintNote(notes[j]);
+    paintChoices();
+  }
+
+  /* The md backend's whole redraw: everything on the page that comes from
+     state.data apart from decisions, notes and choices. */
+  function drawAll() {
     unwrapMarks();
     drift = {};
     /* Structure first: added rows and columns have to exist before the
@@ -612,13 +626,32 @@
     Object.keys(state.data.marks).forEach(anchorMark);
     Object.keys(state.data.tables).forEach(anchorLostTable);
     anchorEarlier();
+  }
 
-    /* Sections and steps share one decision map and one kind of control. */
-    var decs = docEl.querySelectorAll(".dec");
-    for (var i = 0; i < decs.length; i++) paintDecision(decs[i]);
-    var notes = docEl.querySelectorAll(".note-btn");
-    for (var j = 0; j < notes.length; j++) paintNote(notes[j]);
-    paintChoices();
+  /* ------------------------------------------------------ anchor backend */
+
+  /* Marks, bubbles, the counters and earlier rounds reach the page through
+     one backend (ADR 0019). This one is the DOM-range code above and below,
+     unchanged; an HTML page plugs in a frame backend instead. A handle is
+     whatever the backend hands out as a stop: here, the mark element. */
+  function mdBackend() {
+    return {
+      draw: function (id) { if (id) anchorMark(id); else drawAll(); },
+      stops: navTargets,
+      rect: function (h) { return h.getBoundingClientRect(); },
+      scrollTo: function (h) {
+        if (isWellInView(h)) { pulse(h); return; }
+        animateScroll(scrollCenter(h), function () { pulse(h); });
+      },
+      /* Every piece of a comment that spans paragraphs lights up together. An
+         earlier round's key (r<i>:...) never collides with a current id. */
+      open: function (id) {
+        var pieces = docEl.querySelectorAll('mark.has-comment[data-mark="' + cssEsc(id) + '"], ' +
+                                            '[data-prev="' + cssEsc(id) + '"]');
+        for (var i = 0; i < pieces.length; i++) pieces[i].classList.add("is-open");
+      },
+      isEarlier: isEarlier
+    };
   }
 
   /* Every comment gets a place on the page, and none of them raises an alarm.
@@ -780,9 +813,13 @@
   }
 
   function showEarlier(markEl) {
-    var key = markEl.getAttribute("data-prev"), info = prevInfo[key];
+    earlierBubble(markEl.getAttribute("data-prev"), markEl.getBoundingClientRect());
+  }
+
+  function earlierBubble(key, rect) {
+    var info = prevInfo[key];
     if (!info) return;
-    openBubble(markEl.getBoundingClientRect(), function (b) {
+    openBubble(rect, function (b) {
       b.appendChild(mkEl("p", "bubble-label", "Earlier round"));
       if (info.kind === "comment") {
         b.appendChild(mkEl("p", "bubble-quote", truncate(info.quote || "", QUOTE_CAP)));
@@ -799,8 +836,7 @@
       }
     });
     /* After openBubble, which clears every open state first. */
-    var pieces = docEl.querySelectorAll('[data-prev="' + cssEsc(key) + '"]');
-    for (var i = 0; i < pieces.length; i++) pieces[i].classList.add("is-open");
+    backend.open(key);
   }
 
   function paintDecision(el) {
@@ -1985,19 +2021,26 @@
     var quote = sel.toString().replace(/\s+/g, " ").trim();
     var host = range.startContainer.parentElement;
     var sec = host && host.closest ? host.closest(".sec") : null;
-    var secId = sec ? sec.getAttribute("data-sec") : "";
-    var root = sec || docEl;
-    var occ = occurrenceOf(root, quote, range);
-    var rect = range.getBoundingClientRect();
+    askComment({
+      sec: sec ? sec.getAttribute("data-sec") : "",
+      quote: quote,
+      occ: occurrenceOf(sec || docEl, quote, range),
+      rect: range.getBoundingClientRect(),
+      clear: function () { sel.removeAllRanges(); }
+    });
+  }
 
-    openBubble(rect, function (b) {
+  /* cap: {sec, quote, occ, rect, clear, extra}. A backend's own anchor fields
+     (an HTML page's selector and start tag) ride along in extra. */
+  function askComment(cap) {
+    openBubble(cap.rect, function (b) {
       b.appendChild(mkEl("p", "bubble-head", "Comment on this passage"));
-      b.appendChild(mkEl("p", "bubble-quote", truncate(quote, QUOTE_CAP)));
+      b.appendChild(mkEl("p", "bubble-quote", truncate(cap.quote, QUOTE_CAP)));
       var ta = mkEl("textarea");
       ta.placeholder = "What is wrong with it?";
       b.appendChild(ta);
       var row = actionsRow();
-      row.appendChild(mkBtn("Cancel", "btn small", function () { closeBubble(); sel.removeAllRanges(); }));
+      row.appendChild(mkBtn("Cancel", "btn small", function () { closeBubble(); cap.clear(); }));
       row.appendChild(mkBtn("Comment", "btn small primary", commit));
       b.appendChild(row);
       b.appendChild(mkEl("p", "bubble-hint", "Enter saves, Esc cancels."));
@@ -2008,10 +2051,12 @@
         var text = ta.value.trim();
         if (!text) { closeBubble(); return; }
         var id = "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-        state.data.marks[id] = { sec: secId, quote: quote, occ: occ, comment: text };
+        var mk = { sec: cap.sec, quote: cap.quote, occ: cap.occ, comment: text };
+        Object.keys(cap.extra || {}).forEach(function (k) { if (!(k in mk)) mk[k] = cap.extra[k]; });
+        state.data.marks[id] = mk;
         closeBubble();
-        sel.removeAllRanges();
-        anchorMark(id);
+        cap.clear();
+        backend.draw(id);
         save("mark:" + id);
         updatePrompt();
       }
@@ -2021,10 +2066,13 @@
   /* ---- an existing comment ---- */
 
   function showComment(markEl) {
-    var id = markEl.getAttribute("data-mark");
+    commentBubble(markEl.getAttribute("data-mark"), markEl.getBoundingClientRect());
+  }
+
+  function commentBubble(id, rect) {
     var entry = state.data.marks[id];
     if (!entry) return;
-    openBubble(markEl.getBoundingClientRect(), function (b) {
+    openBubble(rect, function (b) {
       b.appendChild(mkEl("p", "bubble-head", "Your comment"));
       b.appendChild(mkEl("p", "bubble-quote", truncate(entry.quote, QUOTE_CAP)));
       b.appendChild(mkEl("p", "bubble-body", entry.comment));
@@ -2041,18 +2089,16 @@
         save("unmark:" + id);
         updatePrompt();
       }));
-      row.appendChild(mkBtn("Edit", "btn small primary", function () { editComment(markEl, id); }));
+      row.appendChild(mkBtn("Edit", "btn small primary", function () { editComment(id, rect); }));
       b.appendChild(row);
     });
-    /* After openBubble, which clears every open state first. Every piece of a
-       comment that spans paragraphs lights up together. */
-    var pieces = docEl.querySelectorAll('mark.has-comment[data-mark="' + cssEsc(id) + '"]');
-    for (var pc = 0; pc < pieces.length; pc++) pieces[pc].classList.add("is-open");
+    /* After openBubble, which clears every open state first. */
+    backend.open(id);
   }
 
-  function editComment(markEl, id) {
+  function editComment(id, rect) {
     var entry = state.data.marks[id];
-    openBubble(markEl.getBoundingClientRect(), function (b) {
+    openBubble(rect, function (b) {
       b.appendChild(mkEl("p", "bubble-head", "Edit comment"));
       var ta = mkEl("textarea");
       ta.value = entry.comment;
@@ -2446,15 +2492,12 @@
   }
 
   function jumpTo(kind) {
-    var list = navTargets(kind);
+    var list = backend.stops(kind);
     if (!list.length) return;
     navAt[kind] = (navAt[kind] + 1) % list.length;
-    var el = list[navAt[kind]];
     closeBubble();
     flash((navAt[kind] + 1) + " of " + list.length, "", 2400);
-
-    if (isWellInView(el)) { pulse(el); return; }
-    animateScroll(scrollCenter(el), function () { pulse(el); });
+    backend.scrollTo(list[navAt[kind]]);
   }
 
   function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
@@ -2467,7 +2510,7 @@
       all: feedbackCount()
     };
     var lists = {
-      comments: navTargets("comments"), edits: navTargets("edits"), all: navTargets("all")
+      comments: backend.stops("comments"), edits: backend.stops("edits"), all: backend.stops("all")
     };
     if (scopeNow() !== "current") {
       /* Comments and edits count the same lists the clicks walk. The all
@@ -2478,7 +2521,7 @@
       counts.comments = lists.comments.length;
       counts.edits = lists.edits.length;
       counts.all = scopeNow() === "all"
-        ? feedbackCount() + lists.all.filter(isEarlier).length
+        ? feedbackCount() + lists.all.filter(backend.isEarlier).length
         : lists.all.length;
     }
     var btns = doc.querySelectorAll(".counter");
@@ -3654,6 +3697,7 @@
   }
 
   function start(staleHours) {
+    backend = mdBackend();
     collectEditables();
     collectTables();
     expireOld(hoursMs(staleHours));

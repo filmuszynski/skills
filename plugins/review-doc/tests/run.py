@@ -370,7 +370,7 @@ def test_counters_are_navigation():
     # seen. The scroll is animated by hand because the native smooth scroll was
     # measured doing nothing at all in this container.
     assert "function animateScroll(" in js and "function scrollCenter(" in js
-    assert "animateScroll(scrollCenter(el), function () { pulse(el); });" in js
+    assert "animateScroll(scrollCenter(h), function () { pulse(h); });" in js_function("mdBackend")
     assert 'behavior: "smooth"' not in js, "the native smooth scroll gives no dependable end signal"
     assert "if (!ticked) finish();" in js,         "frames are throttled in a hidden tab; the jump must still land"
     assert "function isWellInView(" in js, "an element already on screen should pulse at once"
@@ -2021,13 +2021,13 @@ def test_pure_deletion_has_no_offsets():
 @test
 def test_earlier_marks_draw_after_current_and_open_read_only():
     src = shell._asset("shell.js")
-    ap = fn_body_run(src, "applyDataToDoc")
+    ap = fn_body_run(src, "drawAll")
     assert ap.index("Object.keys(state.data.marks).forEach(anchorMark)") < ap.index("anchorEarlier()")
     um = fn_body_run(src, "unwrapMarks")
     assert "mark.prev-comment" in um and "mark.prev-edit" in um and "mark.prev-pill" in um
     ui = fn_body_run(src, "unwrapMarksIn")
     assert "mark.prev-comment" in ui and "mark.prev-edit" in ui
-    sp = fn_body_run(src, "showEarlier")
+    sp = fn_body_run(src, "earlierBubble")
     assert '"Earlier round"' in sp and "Delete" not in sp and "Revert" not in sp
     ae = fn_body_run(src, "anchorEarlier")
     assert '"earlier edit"' in ae and '"earlier table change"' in ae
@@ -2039,6 +2039,57 @@ def test_earlier_marks_draw_after_current_and_open_read_only():
     pm = st[st.index('closest("[data-prev]")'):st.index("showEarlier(pm)")]
     assert 't.closest("mark.has-comment")' in pm and 't.closest("mark.edited")' in pm, \
         "an earlier mark inside a current comment or rewrite leaves the click to it"
+
+
+@test
+def test_md_backend_has_the_six_methods():
+    mb = js_function("mdBackend")
+    for name in ("draw:", "stops:", "rect:", "scrollTo:", "open:", "isEarlier:"):
+        assert name in mb, name
+    assert "anchorMark(id)" in mb and "drawAll()" in mb
+    assert "stops: navTargets" in mb
+
+
+@test
+def test_bubbles_take_an_id_and_a_rect():
+    for name in ("commentBubble", "earlierBubble"):
+        assert "openBubble(rect" in js_function(name), name
+    sc = js_function("showComment")
+    assert "commentBubble(" in sc and "openBubble(" not in sc
+    se = js_function("showEarlier")
+    assert "earlierBubble(" in se and "openBubble(" not in se
+    assert "function editComment(id, rect)" in shell._asset("shell.js")
+
+
+@test
+def test_comment_pieces_open_and_pulse_together():
+    cb = js_function("commentBubble")
+    assert cb.rstrip("}").rstrip().endswith("backend.open(id);"), "every piece lights after openBubble cleared them"
+    mb = js_function("mdBackend")
+    assert 'mark.has-comment[data-mark="' in mb[mb.index("open:"):]
+    pu = js_function("pulse")
+    assert 'mark.has-comment[data-mark="' in pu and '[data-prev="' in pu
+
+
+@test
+def test_ask_comment_stores_extra_fields():
+    ac = js_function("askComment")
+    assert "cap.extra" in ac and "backend.draw(id)" in ac and "openBubble(cap.rect" in ac
+    assert "cap.clear()" in ac and "removeAllRanges" not in ac
+    af = js_function("askForComment")
+    assert "askComment(" in af and af.count("sel.removeAllRanges()") == 1
+    assert "clear: function () { sel.removeAllRanges(); }" in af
+
+
+@test
+def test_shell_paths_go_through_the_backend():
+    ad = js_function("applyDataToDoc")
+    assert "backend.draw();" in ad and "anchorEarlier()" not in ad
+    jt = js_function("jumpTo")
+    assert "backend.stops(" in jt and "backend.scrollTo(" in jt and "navTargets(" not in jt
+    uc = js_function("updateCounters")
+    assert "navTargets(" not in uc and "backend.stops(" in uc
+    assert "filter(backend.isEarlier)" in uc and "filter(isEarlier)" not in uc
 
 
 @test
