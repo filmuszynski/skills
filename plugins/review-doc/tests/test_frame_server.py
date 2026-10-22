@@ -518,3 +518,24 @@ def test_no_second_response_after_headers_went_out():
     h._file_mode = early
     h._serve()
     assert sent == [500], sent
+
+
+@test
+def test_selfcontained_fixture_served_with_probe():
+    h = new_home()
+    root = os.path.join(h, "site")
+    os.makedirs(root)
+    src = os.path.join(FIX, "site_selfcontained.html")
+    shutil.copy(src, os.path.join(root, "index.html"))
+    html_page(h, SLUG, root)
+    with open(src, encoding="utf-8") as fh:
+        original = fh.read()
+    assert len(original) > 20000, len(original)
+    assert "http://" not in original and "https://" not in original
+    with serving(h) as srv:
+        status, _, data = frame_request(srv, "GET", "/", SLUG)
+    text = data.decode("utf-8")
+    assert status == 200
+    assert len(re.findall(PROBE_RE, text)) == 1
+    script = re.search(r"<script>(.*?)</script>", original, re.S).group(0)
+    assert script in text
