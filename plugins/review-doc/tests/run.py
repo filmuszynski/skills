@@ -2425,7 +2425,7 @@ def test_host_runs_match_counter():
         assert frag in st, frag
 
 
-PROBE_FNS = ["var INLINE", "var SKIP", "var NO_EDIT", "tagOf", "flatText", "pathOf", "cmpNodes",
+PROBE_FNS = ["var INLINE", "var SKIP", "var NO_EDIT", "var LEAF", "tagOf", "flatText", "pathOf", "cmpNodes",
              "inside", "flatIndex", "nthIndex", "retext", "editTarget", "passageAnchor",
              "cssEsc", "stepFor", "selectorFor", "startTag"]
 PROBE_PRE = """
@@ -2434,6 +2434,7 @@ function el(tag, kids, extra) {
   var e = {nodeType: 1, tagName: tag.toUpperCase(), childNodes: [], parentNode: null,
            attributes: [], id: "", className: "",
            ownerDocument: {createTextNode: textNode}};
+  e.getAttribute = function (n) { return n === "class" && e.className ? e.className : null; };
   e.appendChild = function (k) { k.parentNode = e; e.childNodes.push(k); return k; };
   (kids || []).forEach(function (k) { e.appendChild(typeof k === "string" ? textNode(k) : k); });
   for (var key in (extra || {})) e[key] = extra[key];
@@ -2477,6 +2478,10 @@ def test_retext_keeps_inline_formatting():
                     % runs_expr("Book the course today", "Book the full course now", False),
                     pre, RUNS_FNS)
     assert sep == ["the full course", "Book the full course now", True], sep
+    now = run_probe("(retext(p, %s), p.childNodes[2].nodeValue)"
+                    % runs_expr("Book the course today", "Book the full course now", False),
+                    pre, RUNS_FNS)
+    assert now == " now", now   # "now" lands outside the link
     # coalesced (the real pipeline): same paragraph text, same link object
     out = run_probe("(retext(p, %s), [flatText(p).text, p.childNodes[1] === a])"
                     % runs_expr("Book the course today", "Book the full course now"), pre, RUNS_FNS)
@@ -2485,10 +2490,28 @@ def test_retext_keeps_inline_formatting():
 
 @test
 def test_retext_last_run_first():
-    alt, neu = "a b c d e f g h", "a X c d e f Y h"
-    pre = 'var p = el("p", ["a b ", el("i", ["c d e f "]), "g h"]);'
-    out = run_probe("(retext(p, %s), flatText(p).text)" % runs_expr(alt, neu), pre, RUNS_FNS)
+    # Both changes sit in ONE text node and the first one changes the length, so
+    # applying first-to-last would shift the second.
+    alt, neu = "a b c d e f g h", "a XYZW c d e f Y h"
+    pre = 'var p = el("p", ["a b c d e f g h"]);'
+    out = run_probe("(retext(p, %s), flatText(p).text)" % runs_expr(alt, neu, False), pre, RUNS_FNS)
     assert out == neu, out
+
+
+@test
+def test_retext_replacement_stays_in_its_link():
+    pre = 'var a = el("a", ["docs"]); var p = el("p", ["See ", a, ". Then go"]);'
+    out = run_probe("(retext(p, %s), [a.childNodes[0].nodeValue, flatText(p).text])"
+                    % runs_expr("See docs. Then go", "See docs; then go", False), pre, RUNS_FNS)
+    assert out == ["docs;", "See docs; then go"], out
+
+
+@test
+def test_flat_index_start_skips_virtual_space():
+    pre = ('var t1 = textNode("One."), t2 = textNode("Two.");'
+           'var d = el("div", [el("p", [t1]), el("p", [t2])]);')
+    out = run_probe("(f = flatText(d), [flatIndex(f, t2, 0), flatIndex(f, t2, 0, true), flatIndex(f, t1, 4), flatIndex(f, t2, 4)])", pre + 'var f;')
+    assert out == [4, 5, 4, 9], out
 
 
 @test
@@ -2508,8 +2531,10 @@ def test_edit_target_rules():
            'var bt = textNode("ok"); var btn = el("button", [bt]); var d2 = el("div", [btn]);'
            'var st = textNode("s"); var svg = el("svg", [el("text", [st])]); var d3 = el("div", [svg]);')
     out = run_probe("[editTarget(t1) === p, editTarget(link.childNodes[0]) === link, "
-                    "editTarget(tx), editTarget(bt), editTarget(st), editTarget(el(\"p\", []))]", pre)
-    assert out == [True, True, None, None, None, None], out
+                    "editTarget(tx), editTarget(bt), editTarget(st), editTarget(el(\"p\", [])), "
+                    "editTarget(brt) === brp]", pre + 'var brt = textNode("Line one"); '
+                    'var brp = el("p", [brt, el("br", []), "Line two"]);')
+    assert out == [True, True, None, None, None, None, True], out
 
 
 @test

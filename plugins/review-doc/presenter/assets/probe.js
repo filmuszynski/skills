@@ -19,6 +19,10 @@
                  TEXTAREA: 1, SELECT: 1, OPTION: 1, BUTTON: 1, IFRAME: 1, IMG: 1, VIDEO: 1,
                  AUDIO: 1, CANVAS: 1, "REVIEW-DOC-LAYER": 1};
 
+  /* Void tags that sit inside a line of text without making their parent a block
+     of blocks: <p>Line one<br>Line two</p> is still one editable paragraph. */
+  var LEAF = {BR: 1, WBR: 1, IMG: 1};
+
   function tagOf(n) {
     return n && n.nodeType === 1 ? String(n.tagName).toUpperCase() : "";
   }
@@ -102,8 +106,11 @@
   }
 
   /* The flat position of a DOM boundary point: the first entry at or after it,
-     text.length past the end. */
-  function flatIndex(flat, node, off) {
+     text.length past the end. With `isStart` true (the start of a selection) the
+     result also skips forward over virtual spaces, so a selection that begins at
+     the top of a paragraph does not pick up the space before it. An end point
+     keeps the plain result. */
+  function flatIndex(flat, node, off, isStart) {
     var last = -1, i;
     var child = node.nodeType === 1 ? (node.childNodes[off] || null) : null;
     for (i = 0; i < flat.at.length; i++) {
@@ -118,7 +125,9 @@
       }
       if (before) last = i;
     }
-    return last + 1;
+    var idx = last + 1;
+    if (isStart) while (idx < flat.at.length && !flat.at[idx].node) idx++;
+    return idx;
   }
 
   function nthIndex(hay, needle, n) {
@@ -156,12 +165,22 @@
         }
       }
       if (!s.added) continue;
-      var target = null, pos = 0;
-      if (s.p > 0 && flat.at[s.p - 1] && flat.at[s.p - 1].node) {
+      var target = null, pos = 0, q;
+      /* A replacement goes where the first deleted real character stood, so a
+         link around a replaced word keeps its replacement. Only a pure insertion
+         uses the neighbour rule below. */
+      for (q = s.p; q < s.p + s.removed.length; q++) {
+        if (flat.at[q] && flat.at[q].node) {
+          target = flat.at[q].node;
+          pos = flat.at[q].off;
+          break;
+        }
+      }
+      if (!target && s.p > 0 && flat.at[s.p - 1] && flat.at[s.p - 1].node) {
         e = flat.at[s.p - 1];
         target = e.node;
         pos = e.off + e.len;
-      } else if (flat.at[s.p] && flat.at[s.p].node) {
+      } else if (!target && flat.at[s.p] && flat.at[s.p].node) {
         target = flat.at[s.p].node;
         pos = flat.at[s.p].off;
       }
@@ -187,7 +206,7 @@
     var pick = el, blockKid = false, i;
     for (i = 0; i < el.childNodes.length; i++) {
       var k = el.childNodes[i];
-      if (k.nodeType === 1 && !INLINE[tagOf(k)] && !SKIP[tagOf(k)]) blockKid = true;
+      if (k.nodeType === 1 && !INLINE[tagOf(k)] && !SKIP[tagOf(k)] && !LEAF[tagOf(k)]) blockKid = true;
     }
     if (tagOf(el) === "HTML" || tagOf(el) === "BODY" || blockKid) {
       pick = null;
@@ -220,7 +239,7 @@
   }
 
   function stepFor(el) {
-    var tag = String(el.tagName).toLowerCase(), s = tag, cls = String(el.className || "").trim();
+    var tag = String(el.tagName).toLowerCase(), s = tag, cls = String(el.getAttribute("class") || "").trim();
     if (cls) s += "." + cssEsc(cls.split(/\s+/)[0]);
     var par = el.parentNode, same = 0, idx = 0, i;
     if (par) {
