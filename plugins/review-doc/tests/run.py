@@ -2901,7 +2901,7 @@ var b;
 @test
 def test_html_backend_has_the_seam_methods():
     out = _backend_run("return Object.keys(b.backend).sort();")
-    assert out == sorted("draw stops rect scrollTo open isEarlier mode closed rescope".split()), out
+    assert out == sorted("draw stops rect scrollTo open isEarlier mode closed rescope answerLines".split()), out
     out = _backend_run("return [b.backend.isEarlier(), b.backend.stops('all').length];")
     assert out == [False, 0], out
 
@@ -3558,6 +3558,74 @@ def test_gone_hint_only_for_gone():
     assert "if (backend.rescope) backend.rescope();" in js_function("onScope")
 
 
+ANS_FNS = [("tagNameOf", SH), ("truncate", SH), ("firstStopOrder", SH), ("htmlAnswerLines", SH)]
+ANS_DATA = """var data = {general: "Hero feels crowded.", marks: {a: {quote: "seit 2019 begleite ich",
+  comment: "Make it 2018.", sel: "main > p:nth-of-type(2)", tag: "<p class='x'>", before: "Ich bin", after: "Menschen"}},
+  edits: {x: {alt: "Neu anfangen", neu: "Neu anfangen, mit Plan", sel: "#hero > h1", tag: "<h1>"}}};
+var found = {};"""
+
+
+def answer(expr):
+    return run_js(ANS_FNS, expr, ANS_DATA)
+
+
+@test
+def test_answer_matches_the_spec_shape():
+    out = answer('htmlAnswerLines(data, found, ["e:x", "m:a"], data.general)')
+    assert out == ["Whole page: Hero feels crowded.",
+                   "1. Rewrite in <h1>  (#hero > h1)",
+                   '   "Neu anfangen" → "Neu anfangen, mit Plan"',
+                   '2. Passage in <p>  (main > p:nth-of-type(2)): "…seit 2019 begleite ich…"',
+                   "   Comment: Make it 2018."], out
+
+
+@test
+def test_answer_uses_the_current_selector():
+    out = answer('(found["m:a"] = {step: 2, sel: "main > p:nth-of-type(3)"}, htmlAnswerLines(data, found, ["m:a"], ""))')
+    assert out[0] == '1. Passage in <p>  (main > p:nth-of-type(3)): "…seit 2019 begleite ich…"', out
+
+
+@test
+def test_answer_lost_and_adopted_notes():
+    out = answer('(found["m:a"] = {step: 0, sel: "x"}, found["e:x"] = {step: 1, sel: "#hero > h1", adopted: true},'
+                 ' htmlAnswerLines(data, found, ["m:a", "e:x"], ""))')
+    assert out[0].startswith("1. Passage in <p>  (main > p:nth-of-type(2)) (the element has changed since): "), out
+    assert out[2] == "2. Rewrite in <h1>  (#hero > h1) (already in the page)", out
+
+
+@test
+def test_answer_unordered_items_follow():
+    out = answer('htmlAnswerLines(data, found, ["e:x"], "")')
+    assert out[0].startswith("1. Rewrite") and out[2].startswith("2. Passage"), out
+    out = answer('htmlAnswerLines(data, found, [], "")')
+    assert out[0].startswith("1. Passage") and out[2].startswith("2. Rewrite"), out
+
+
+@test
+def test_answer_skips_unchanged_rewrite_and_has_no_general_line_when_empty():
+    out = answer('(data.edits.x.neu = data.edits.x.alt, htmlAnswerLines(data, found, ["e:x", "m:a"], "  "))')
+    assert len(out) == 2 and out[0].startswith("1. Passage"), out
+
+
+@test
+def test_first_stop_order():
+    out = answer('firstStopOrder([{key: "e:x:0"}, {key: "m:a"}, {key: "e:x:1"}, {key: "lost:m:b"}, {key: "r0:m:c"}, {key: "e:y"}])')
+    assert out == ["e:x", "m:a", "e:y"], out
+
+
+@test
+def test_build_prompt_takes_backend_lines():
+    assert "backend.answerLines" in js_function("buildPrompt")
+    assert "html:" in shell._asset("shell.js").split("var HINTS = {")[1][:80]
+
+
+@test
+def test_truncate_copies_agree():
+    def norm(s):
+        return re.sub(r"\s+", " ", s).strip()
+    assert norm(js_function("truncate", SH)) == norm(js_function("truncate", "shell.js"))
+
+
 def main():
     for mod in NEW_TEST_MODULES:
         __import__(mod)
@@ -3580,3 +3648,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

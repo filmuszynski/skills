@@ -110,6 +110,67 @@
     return m ? m[1].toLowerCase() : "";
   }
 
+  /* A copy of shell.js's truncate, pinned equal by a test. */
+  function truncate(s, n) { return s.length > n ? s.slice(0, n - 1) + "\u2026" : s; }
+
+  /* Item keys in stop order, first occurrence only: e:<id>:<n> is e:<id>, and
+     lost: and earlier-round stops are not answer items. */
+  function firstStopOrder(stops) {
+    var out = [], seen = Object.create(null);
+    for (var i = 0; i < (stops || []).length; i++) {
+      var key = stops[i] && stops[i].key;
+      if (typeof key !== "string" || /^(lost:|r\d+:)/.test(key)) continue;
+      if (/^e:/.test(key)) key = key.replace(/:\d+$/, "");
+      else if (!/^m:./.test(key)) continue;
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push(key);
+    }
+    return out;
+  }
+
+  /* The answer's lines for an HTML page (decisions 9 and 10): the general
+     note, then each comment and rewrite in page order. Items missing from
+     `order` follow, comments before rewrites. Pure. */
+  function htmlAnswerLines(data, found, order, general) {
+    var lines = [], n = 0, seen = Object.create(null), keys = [], i;
+    var marks = (data && data.marks) || {}, edits = (data && data.edits) || {};
+    function has(map, id) { return Object.prototype.hasOwnProperty.call(map, id); }
+    function add(key) {
+      if (seen[key]) return;
+      var m = /^([me]):(.+)$/.exec(key);
+      if (!m || !has(m[1] === "m" ? marks : edits, m[2])) return;
+      seen[key] = true;
+      keys.push(key);
+    }
+    for (i = 0; i < (order || []).length; i++) add(order[i]);
+    Object.keys(marks).forEach(function (id) { add("m:" + id); });
+    Object.keys(edits).forEach(function (id) { add("e:" + id); });
+
+    if (general && String(general).trim()) lines.push("Whole page: " + String(general).trim());
+    for (i = 0; i < keys.length; i++) {
+      var key = keys[i], isMark = key.charAt(0) === "m";
+      var item = isMark ? marks[key.slice(2)] : edits[key.slice(2)];
+      if (!isMark && item.alt === item.neu) continue;
+      var f = found && has(found, key) ? found[key] : null;
+      var sel = f && f.step >= 1 && f.step <= 3 && f.sel ? f.sel : item.sel;
+      var note = "";
+      if (f && f.step === 0) note = " (the element has changed since)";
+      else if (!isMark && f && f.adopted) note = " (already in the page)";
+      var head = (isMark ? "Passage in <" : "Rewrite in <") + tagNameOf(item.tag) + ">  (" + sel + ")" + note;
+      n++;
+      if (isMark) {
+        var q = (item.before ? "…" : "") + truncate(String(item.quote || ""), 90) + (item.after ? "…" : "");
+        lines.push(n + ". " + head + ': "' + q + '"');
+        lines.push("   Comment: " + item.comment);
+      } else {
+        lines.push(n + ". " + head);
+        lines.push('   "' + item.alt + '" → "' + item.neu + '"');
+      }
+    }
+    return lines;
+  }
+
   /* The entries of runOffsets(alt, neu), placed in the new text as the probe
      reads it. runOffsets counts squeezed text, without spaces, and the probe's
      flat text keeps them, so its positions would land short. Same entries,
@@ -571,6 +632,11 @@
         if (isStr(id) && id.indexOf("lost:") === 0) return;
         opened = true;
         env.post("open", {id: id});
+      },
+      /* shell.js's buildPrompt uses these lines instead of the md ones. */
+      answerLines: function () {
+        var d = host.state.data;
+        return htmlAnswerLines(d, found, firstStopOrder(stops), d.general);
       },
       isEarlier: isEarlierKey,
       /* shell.js's onScope calls this: the pills follow the counters' scope. */

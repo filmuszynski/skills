@@ -2246,9 +2246,9 @@
   function truncate(s, n) { return s.length > n ? s.slice(0, n - 1) + "\u2026" : s; }
 
   function buildPrompt() {
-    var lines = [], approved = [];
+    var lines = [], approved = [], viaBackend = !!(backend && backend.answerLines);
 
-    for (var i = 0; i < D.sections.length; i++) {
+    for (var i = 0; !viaBackend && i < D.sections.length; i++) {
       var sec = D.sections[i];
       var st = state.data.steps[sec.id] || {};
       var marks = marksFor(sec.id);
@@ -2295,25 +2295,30 @@
 
     /* Only explicit approvals are listed. A section nobody touched is silence,
        not consent, and must never be reported back as approved. */
-    if (approved.length) lines.push("- Approved as written: " + approved.join("; "));
+    if (viaBackend) {
+      /* An HTML page: its backend writes the whole body (items, general note). */
+      lines = backend.answerLines();
+    } else if (approved.length) lines.push("- Approved as written: " + approved.join("; "));
 
-    /* A comment whose section is not in the list (renamed heading, or text
-       outside any section) is not dropped: it goes out on its own line. */
-    Object.keys(state.data.marks).forEach(function (k) {
-      if (!sectionFor(state.data.marks[k].sec)) lines.push(markLine("On", k, state.data.marks[k]));
-    });
+    var editLines = [], tableLines = [];
+    if (!viaBackend) {
+      /* A comment whose section is not in the list (renamed heading, or text
+         outside any section) is not dropped: it goes out on its own line. */
+      Object.keys(state.data.marks).forEach(function (k) {
+        if (!sectionFor(state.data.marks[k].sec)) lines.push(markLine("On", k, state.data.marks[k]));
+      });
 
-    if (state.data.general.trim()) lines.push("- " + (D.prompt.generalLabel || "Whole plan") + ": " + state.data.general.trim());
+      if (state.data.general.trim()) lines.push("- " + (D.prompt.generalLabel || "Whole plan") + ": " + state.data.general.trim());
 
-    var editIds = Object.keys(state.data.edits);
-    var editLines = [];
-    for (var e = 0; e < editIds.length; e++) {
-      if (editLocked(editIds[e])) continue;
-      var ed = state.data.edits[editIds[e]];
-      var sc = sectionFor(ed.sec);
-      editLines.push("- " + (sc ? labelOf(sc) : "text") + ': "' + ed.alt + '" -> "' + ed.neu + '"');
+      var editIds = Object.keys(state.data.edits);
+      for (var e = 0; e < editIds.length; e++) {
+        if (editLocked(editIds[e])) continue;
+        var ed = state.data.edits[editIds[e]];
+        var sc = sectionFor(ed.sec);
+        editLines.push("- " + (sc ? labelOf(sc) : "text") + ': "' + ed.alt + '" -> "' + ed.neu + '"');
+      }
+      tableLines = tablePromptLines();
     }
-    var tableLines = tablePromptLines();
 
     var chosen = D.meta.kind === "options" ? chosenNames() : [];
     var lead = "";
@@ -2390,6 +2395,7 @@
   }
 
   var HINTS = {
+    html: "Select text in Comment mode to comment on it, or click text in Edit text mode to rewrite it.",
     plan: "Nothing marked yet. Drag over any sentence to comment on it, switch to " +
           "Edit text to rewrite a line, or use the tick beside a section or step.",
     options: "Nothing chosen yet. Pick a card, or drag over any sentence to say what " +
