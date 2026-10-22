@@ -166,8 +166,9 @@
         if (!state.data.pending || typeof state.data.pending !== "object") state.data.pending = null;
       }
       /* Only a mode this page offers: a stored "use" on an md page would leave
-         no button pressed. */
-      if (got && got.mode && doc.querySelector('.modes button[data-mode="' + got.mode + '"]')) state.mode = got.mode;
+         no button pressed. A value outside the three known modes is never put in
+         a selector, where it could throw and skip the rest of load(). */
+      if (got && ["use", "comment", "edit"].indexOf(got.mode) >= 0 && doc.querySelector('.modes button[data-mode="' + got.mode + '"]')) state.mode = got.mode;
       if (got && got.ui) {
         state.ui.head = got.ui.head !== false;
         /* The prompt is not restored: every page opens with it hidden, and the

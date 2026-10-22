@@ -2751,6 +2751,7 @@ return [init, early, away, bye, awayAt, enabled, types];""")
 def test_html_backend_edit_and_revert():
     out = _backend_run("""
 b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});
+b.backend.mode("edit");
 b.receive({rd: 1, type: "edit", id: null, alt: "a b c d e f g h", neu: "a X c d e f Y h",
            anchor: {sel: "p", tag: "<p>", text: "a b"}});
 var id = Object.keys(state.data.edits)[0], ed = state.data.edits[id];
@@ -2801,6 +2802,7 @@ SNAP = ('JSON.stringify(state.data) + "|" + JSON.stringify(Object.prototype) + "
 @test
 def test_html_backend_edit_rejects_unknown_and_proto_ids():
     out = _backend_run(HELLO + """
+b.backend.mode("edit");
 var before = %s;
 var anchor = {sel: "p", tag: "<p>", text: "a b"};
 ["__proto__", "constructor", "prototype", "h-unknown", 5, {}].forEach(function (id) {
@@ -2909,6 +2911,145 @@ def test_host_fine_runs():
     st = js_function("start")
     assert "fineRuns: function (alt, neu)" in st
     assert "return ops ? buildRuns(ops) : null;" in st
+
+
+# ------------------------------------------------ phase 3 review fixes
+
+@test
+def test_probe_scroll_posts_only_for_the_page_or_a_stop_scroller():
+    pre = ("var document = {documentElement: {}, body: {}, scrollingElement: null};"
+           "var textA = {}, other = {};"
+           "var carousel = {contains: function (n) { return n === other; }};"
+           "var holder = {contains: function (n) { return n === textA; }};"
+           "var stops = [{first: {startContainer: textA}}];")
+    out = run_js(["movesStops"], "[movesStops(document), movesStops(document.documentElement), "
+                 "movesStops(document.body), movesStops(carousel), movesStops(holder), movesStops({})]",
+                 pre, asset="probe.js")
+    assert out == [True, True, True, False, True, False], out
+    on = js_function("onScroll", "probe.js")
+    assert on.index("soon();") < on.index("movesStops(ev && ev.target)"), "every scroll still redraws"
+
+
+@test
+def test_probe_hello_sends_the_load_time_path():
+    js = shell._asset("probe.js")
+    assert js.index("var ENTRY_PATH = location.pathname;") < js.index("var INLINE"), "captured first"
+    assert 'post("hello", {path: ENTRY_PATH' in js_function("onMessage", "probe.js")
+    assert js.count("location.pathname") == 1, "hello never reads the live path"
+
+
+@test
+def test_probe_escape_without_typing_keeps_the_markup():
+    pre = ("var sets = 0, drew = 0;"
+           "var el = {_h: '<b>x</b>', get innerHTML() { return this._h; },"
+           "          set innerHTML(v) { sets++; this._h = v; }};"
+           "var editing = el, startHTML = '<b>x</b>';"
+           "function stopEditing() { var e = editing; editing = null; return e; }"
+           "function drawAgain() { drew++; }")
+    out = run_js(["cancelEdit"], "(function () { cancelEdit(); var a = [sets, drew]; editing = el; "
+                 "el._h = '<b>y</b>'; cancelEdit(); return [a, sets, drew, el._h]; })()", pre, asset="probe.js")
+    assert out == [[0, 1], 1, 2, "<b>x</b>"], out
+
+
+@test
+def test_probe_emptied_element_keeps_a_clickable_box():
+    pre = """
+function getComputedStyle(e) { return {lineHeight: e._lh}; }
+var zero = {getClientRects: function () { return []; },
+            getBoundingClientRect: function () { return {left: 5, right: 5, top: 0, bottom: 0, width: 0, height: 0}; }};
+function box(top, bottom, lh, shown) {
+  return {_lh: lh, getClientRects: function () { return shown ? [1] : []; },
+          getBoundingClientRect: function () { return {left: 40, top: top, right: 400, bottom: bottom}; }};
+}
+var els = [box(100, 124, "normal", true), box(200, 200, "normal", true), box(200, 200, "22px", true),
+           box(0, 0, "normal", false)];
+"""
+    out = run_js(["nonEmpty", "emptyBox", "rectsOf"], "els.map(function (e) { "
+                 "return rectsOf({caret: {range: zero, side: 'left', el: e}, pieces: []}); })", pre, asset="probe.js")
+    assert out == [[{"left": 40, "right": 43, "top": 100, "bottom": 124}],
+                   [{"left": 40, "right": 43, "top": 200, "bottom": 216}],
+                   [{"left": 40, "right": 43, "top": 200, "bottom": 222}],
+                   []], out
+    cf = js_function("caretFor", "probe.js")
+    assert cf.count("el: el}") == 3, "every caret knows its element"
+
+
+@test
+def test_probe_link_without_target_takes_base_target():
+    pre = """
+var location = {origin: "http://a.localhost:8100", href: "start"};
+var window = {open: function () {}};
+var baseTarget = null;
+var document = {baseURI: "http://a.localhost:8100/index.html",
+  querySelector: function (s) {
+    return s === "base[target]" && baseTarget !== null ? {getAttribute: function () { return baseTarget; }} : null;
+  }};
+function link(href, target) {
+  return {href: new URL(href, document.baseURI).href, getAttribute: function (n) {
+    if (n === "href") return href;
+    if (n === "target") return target === undefined ? null : target;
+    return null;
+  }};
+}
+function click(a) {
+  var prevented = false;
+  location.href = "start";
+  followOut({target: {closest: function () { return a; }}, preventDefault: function () { prevented = true; }});
+  return [prevented, location.href];
+}
+"""
+    out = run_js(["followOut"], "(function () { var r = [click(link('/b.html'))]; baseTarget = '_top'; "
+                 "r.push(click(link('/b.html'))); r.push(click(link('/b.html', '_self'))); "
+                 "baseTarget = '_PARENT'; r.push(click(link('/c.html'))); return r; })()", pre, asset="probe.js")
+    assert out == [[False, "start"], [True, "http://a.localhost:8100/b.html"], [False, "start"],
+                   [True, "http://a.localhost:8100/c.html"]], out
+
+
+@test
+def test_html_backend_edit_needs_edit_mode_and_a_sane_size():
+    out = _backend_run(HELLO + """
+var anchor = {sel: "p", tag: "<p>", text: "a b"};
+b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: "a c", anchor: anchor});
+var inComment = Object.keys(state.data.edits).length;
+b.backend.mode("edit");
+var big = new Array(20002).join("x");
+b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: big, anchor: anchor});
+b.receive({rd: 1, type: "edit", id: null, alt: big, neu: "a c", anchor: anchor});
+var tooLong = Object.keys(state.data.edits).length;
+b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: big.slice(1), anchor: anchor});
+return [inComment, tooLong, Object.keys(state.data.edits).length,
+        calls.filter(function (c) { return c[0] === "save"; }).length];""")
+    assert out == [0, 0, 1, 1], out
+
+
+@test
+def test_flat_text_wbr_and_img_add_nothing():
+    out = run_probe('[flatText(el("p", ["super", el("wbr", []), "long"])).text, '
+                    'flatText(el("p", ["a", el("img", []), "b"])).text, '
+                    'flatText(el("p", ["a", el("br", []), "b"])).text]')
+    assert out == ["superlong", "ab", "a b"], out
+
+
+@test
+def test_load_ignores_a_corrupt_stored_mode():
+    pre = """
+var LSKEY = "k", SCOPES = ["current", "previous", "all"], stored = null, state, asked = [];
+var localStorage = {getItem: function () { return stored; }};
+var doc = {querySelector: function (s) {
+  asked.push(s);
+  if (!/^\\.modes button\\[data-mode="(use|comment|edit)"\\]$/.test(s)) throw new Error("bad selector");
+  return {};
+}};
+function pruneSteps() {}
+function fresh() { state = {mode: "use", data: {}, ui: {head: true, zoom: 1, scope: "current"}}; }
+"""
+    out = run_js(["load"], """(function () {
+  fresh(); stored = JSON.stringify({mode: '"]x[', ui: {zoom: 1.5, head: false}}); load();
+  var a = [state.mode, state.ui.zoom, state.ui.head];
+  fresh(); stored = JSON.stringify({mode: "edit", ui: {zoom: 2}}); load();
+  return [a, state.mode, state.ui.zoom, asked];
+})()""", pre)
+    assert out == [["use", 1.5, False], "edit", 2, ['.modes button[data-mode="edit"]']], out
 
 
 def main():

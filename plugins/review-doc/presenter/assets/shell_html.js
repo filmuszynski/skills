@@ -114,6 +114,8 @@
     /* A document without a probe (a PDF, an image, a page we could not inject)
        never says hello; after this long the strip says so. */
     var HELLO_WAIT = 1500;
+    /* Characters an edit's before or after text may hold. */
+    var EDIT_MAX = 20000;
 
     function frameRect() { return env.frameRect(); }
 
@@ -197,7 +199,11 @@
        the selector, and the probe names the element it is holding from that. */
     function onEdit(m) {
       var edits = host.state.data.edits, a = m.anchor;
+      /* The page's own scripts can post edits too: none is taken unless the
+         reviewer chose Edit text, and none large enough to bloat the state. */
+      if (chosen !== "edit") return;
       if (!isStr(m.alt) || !isStr(m.neu)) return;
+      if (m.alt.length > EDIT_MAX || m.neu.length > EDIT_MAX) return;
       if (!a || typeof a !== "object" || !isStr(a.sel) || !isStr(a.tag) || !isStr(a.text)) return;
       /* Only null makes a new id. An id the shell does not hold (or one that
          names the prototype) changes nothing; the probe forgets ids that leave

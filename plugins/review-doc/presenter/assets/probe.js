@@ -8,6 +8,10 @@
 (function () {
   "use strict";
 
+  /* The path this document was loaded at. The probe runs before any page script,
+     so a pushState during load cannot make the entry page look like another one. */
+  var ENTRY_PATH = location.pathname;
+
   /* Tags that flow inside a line of text. Everything else is a block for our
      purposes: it gets a virtual space at its edges and can be a comment anchor. */
   var INLINE = {A: 1, ABBR: 1, B: 1, BDI: 1, BDO: 1, CITE: 1, CODE: 1, DATA: 1, DFN: 1,
@@ -67,7 +71,9 @@
               j++;
             }
           }
-        } else if (k.nodeType === 1 && !SKIP[tagOf(k)]) {
+        } else if (k.nodeType === 1 && !SKIP[tagOf(k)] && tagOf(k) !== "WBR" && tagOf(k) !== "IMG") {
+          /* WBR and an inline image add no text and are not a block edge:
+             super<wbr>long reads "superlong", a<img>b reads "ab". */
           var block = !INLINE[tagOf(k)];
           if (block) boundary();
           walk(k);
@@ -327,7 +333,7 @@
     }
     if (m.type === "init") {
       setMode(m.mode);
-      post("hello", {path: location.pathname, title: document.title});
+      post("hello", {path: ENTRY_PATH, title: document.title});
     } else if (m.type === "mode") {
       setMode(m.mode);
     } else if (m.type === "draw") {
@@ -396,6 +402,21 @@
     return r.width > 0 && r.height > 0;
   }
 
+  /* An element whose whole text was deleted has no line box for its caret, yet
+     it must stay clickable for Revert: a thin box at its own left edge, as tall
+     as the element or, when it collapsed to nothing, one line. An element that
+     is not rendered at all gets no box. */
+  function emptyBox(el, out) {
+    if (!el || !el.getBoundingClientRect || !el.getClientRects().length) return out;
+    var r = el.getBoundingClientRect(), h = r.bottom - r.top;
+    if (!(h > 0)) {
+      var lh = parseFloat(getComputedStyle(el).lineHeight);
+      h = lh > 0 ? lh : 16;
+    }
+    out.push({left: r.left, right: r.left + 3, top: r.top, bottom: r.top + h});
+    return out;
+  }
+
   /* Viewport rectangles of one stop, rebuilt each time (layout moves). */
   function rectsOf(stop) {
     var out = [], i, j;
@@ -405,7 +426,7 @@
         if (nonEmpty(rs[j])) { b = stop.caret.side === "right" ? rs[j] : (b || rs[j]); }
       }
       if (!b) b = stop.caret.range.getBoundingClientRect();
-      if (!b || !b.height) return out;
+      if (!b || !b.height) return emptyBox(stop.caret.el, out);
       var x = stop.caret.side === "right" ? b.right : b.left;
       out.push({left: x - 1.5, right: x + 1.5, top: b.top, bottom: b.bottom});
       return out;
@@ -512,11 +533,11 @@
   /* Where a pure deletion sits in the shown text: right after the character
      before it, else right before the character after it, else the element. */
   function caretFor(el, flat, p) {
-    if (p > 0 && flat.at[p - 1] && flat.at[p - 1].node) return {range: charRange(flat.at[p - 1]), side: "right"};
-    if (flat.at[p] && flat.at[p].node) return {range: charRange(flat.at[p]), side: "left"};
+    if (p > 0 && flat.at[p - 1] && flat.at[p - 1].node) return {range: charRange(flat.at[p - 1]), side: "right", el: el};
+    if (flat.at[p] && flat.at[p].node) return {range: charRange(flat.at[p]), side: "left", el: el};
     var r = document.createRange();
     r.selectNodeContents(el);
-    return {range: r, side: "left"};
+    return {range: r, side: "left", el: el};
   }
 
   function saveOrig(el) {
@@ -781,7 +802,9 @@
   function cancelEdit() {
     if (!editing) return;
     var el = editing;
-    el.innerHTML = startHTML;
+    /* Escape without typing leaves the markup alone: reassigning it would
+       replace the descendants and drop the page's listeners on them. */
+    if (el.innerHTML !== startHTML) el.innerHTML = startHTML;
     stopEditing();
     drawAgain();
   }
@@ -833,8 +856,14 @@
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") return;
     if (url.origin === location.origin) {
-      /* _top or _parent would take the review shell itself away; keep it in the frame. */
-      var tgt = String(a.getAttribute("target") || "").toLowerCase();
+      /* _top or _parent would take the review shell itself away; keep it in the frame.
+         A link without its own target takes the page's <base target>. */
+      var raw = a.getAttribute("target");
+      if (raw === null) {
+        var base = document.querySelector("base[target]");
+        if (base) raw = base.getAttribute("target");
+      }
+      var tgt = String(raw || "").toLowerCase();
       if (tgt === "_top" || tgt === "_parent") {
         ev.preventDefault();
         location.href = a.href;
@@ -902,8 +931,22 @@
     if (mode === "comment") setTimeout(checkSelection, 10);
   }
 
-  function onScroll() {
+  /* Only a scroll that moves the text the bubbles point at closes them: the page
+     itself, or a scroller holding a stop. A carousel or ticker elsewhere scrolls
+     every few hundred ms and would close a comment while it is being typed. */
+  function movesStops(t) {
+    if (!t || t === document || t === document.documentElement || t === document.body ||
+        t === document.scrollingElement) return true;
+    if (!t.contains) return false;
+    for (var i = 0; i < stops.length; i++) {
+      if (stops[i].first && t.contains(stops[i].first.startContainer)) return true;
+    }
+    return false;
+  }
+
+  function onScroll(ev) {
     soon();
+    if (!movesStops(ev && ev.target)) return;
     var now = Date.now();
     if (now - lastScrollPost >= 200) {
       lastScrollPost = now;
