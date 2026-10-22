@@ -2612,6 +2612,187 @@ def test_probe_layer_is_closed_and_on_top():
         assert frag in lay, frag
 
 
+# ------------------------------------------------ the frame backend (shell_html.js)
+
+SH = "shell_html.js"
+RUN_FNS = [("tokenize", "shell.js"), ("diffTokens", "shell.js"), ("isBridge", "shell.js"),
+           ("buildRuns", "shell.js"), ("coalesceRuns", "shell.js")]
+RUN_PRE = "var BRIDGE_WORDS = 2, BRIDGE_CHARS = 24, DIFF_CELLS = 250000;"
+
+
+@test
+def test_is_entry_path():
+    cases = [["/", "index.html"], ["/index.html", "index.html"], ["/my%20page.html", "my page.html"],
+             ["/about.html", "index.html"], ["/sub/", "index.html"], ["/index.html/x", "index.html"]]
+    out = run_js(["isEntryPath"], "%s.map(function (c) { return isEntryPath(c[0], c[1]); })"
+                 % json.dumps(cases), asset=SH)
+    assert out == [True, True, True, False, False, False], out
+
+
+@test
+def test_reverted_text():
+    expr = ('(function () { var runs = coalesceRuns(buildRuns(diffTokens(tokenize("a b c d e f g h"), '
+            'tokenize("a X c d e f Y h")))); return [runs.filter(function (r) { return !r.same; }).length, '
+            'revertedText(runs, 0), revertedText(runs, 1)]; })()')
+    out = run_js(RUN_FNS + [("revertedText", SH)], expr, RUN_PRE)
+    assert out == [2, "a b c d e f Y h", "a X c d e f g h"], out
+
+
+@test
+def test_to_shell_adds_the_frame_offset():
+    out = run_js(["toShell"], "toShell({left: 1, top: 2, right: 3, bottom: 4}, "
+                 "{left: 100, top: 50, right: 900, bottom: 700})", asset=SH)
+    assert out == {"left": 101, "top": 52, "right": 103, "bottom": 54}, out
+
+
+def _backend_run(expr, data=None):
+    """createBackend in node with a fake host and env; posts and host calls are recorded."""
+    pre = RUN_PRE + """
+var calls = [], posts = [], enabled = null, awayAt = "unset";
+var state = {mode: "comment", data: %s};
+var host = {state: state,
+  ask: function (c) { calls.push(["ask", c.quote, c.rect.left, c.extra.sel]); c.clear(); },
+  showComment: function (id, r) { calls.push(["showComment", id, r.top]); },
+  showChange: function (r, was, now, head, label, fn) { calls.push(["showChange", was, now, head, label]); fn(); },
+  closeBubble: function () { calls.push(["closeBubble"]); },
+  save: function (k) { calls.push(["save", k]); },
+  draw: function () { calls.push(["draw"]); b.backend.draw(); },
+  updatePrompt: function () { calls.push(["updatePrompt"]); },
+  undo: function () { calls.push(["undo"]); }, redo: function () { calls.push(["redo"]); },
+  runs: function (a, n) { var o = diffTokens(tokenize(a), tokenize(n)); return o ? coalesceRuns(buildRuns(o)) : null; },
+  fineRuns: function (a, n) { var o = diffTokens(tokenize(a), tokenize(n)); return o ? buildRuns(o) : null; }};
+var env = {entry: "index.html",
+  post: function (type, f) { posts.push([type, f || {}]); },
+  frameRect: function () { return {left: 10, top: 20, right: 810, bottom: 620}; },
+  enable: function (on) { enabled = on; },
+  away: function (p) { awayAt = p; }};
+var b;
+""" % json.dumps(data or {"marks": {}, "edits": {}})
+    fns = RUN_FNS + [("isEntryPath", SH), ("revertedText", SH), ("toShell", SH),
+                     ("newEditId", SH), ("createBackend", SH)]
+    return run_js(fns, "(function () { b = createBackend(host, env); %s })()" % expr, pre)
+
+
+@test
+def test_html_backend_has_the_seam_methods():
+    out = _backend_run("return Object.keys(b.backend).sort();")
+    assert out == sorted("draw stops rect scrollTo open isEarlier mode".split()), out
+    out = _backend_run("return [b.backend.isEarlier(), b.backend.stops('all').length];")
+    assert out == [False, 0], out
+
+
+@test
+def test_html_backend_checks_origin():
+    js = shell._asset(SH)
+    on = js_function("onFrameMessage", SH)
+    hand = on.index("receive(ev.data)")
+    assert on.index("ev.source !== frame.contentWindow") < hand, on
+    assert on.index("ev.origin !== origin") < hand, on
+    assert ".type" not in on[:hand], "nothing is read before both checks"
+    rec = js_function("createBackend", SH)
+    assert rec.index("m.rd !== 1") < rec.index("var t = m.type"), "rd checked before the type"
+    assert not re.search(r'postMessage\([^)]*"\*"', js), "never post to any origin"
+    assert "postMessage(m, origin)" in js
+
+
+@test
+def test_html_backend_counts_undrawn_items():
+    data = {"marks": {"m1": {"sec": "", "quote": "one", "occ": 0, "sel": "p", "comment": "x"},
+                      "m2": {"sec": "", "quote": "gone", "occ": 0, "sel": "h1", "comment": "y"}},
+            "edits": {}}
+    out = _backend_run("""
+b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});
+b.receive({rd: 1, type: "drawn", stops: [{key: "m:m1", kind: "comment"}], rects: {"m:m1": {left: 1, top: 2, right: 3, bottom: 4}}});
+var draw = posts.filter(function (p) { return p[0] === "draw"; })[0];
+return [b.backend.stops("comments"), b.backend.stops("edits").length, Object.keys(state.data.marks).length,
+        draw[1].marks.length, b.backend.rect("m:m1")];""", data)
+    assert out[0] == ["m:m1"] and out[1] == 0, out
+    assert out[2] == 2, "the backend never deletes an undrawn comment"
+    assert out[3] == 2, "both comments are sent to the probe"
+    assert out[4] == {"left": 11, "top": 22, "right": 13, "bottom": 24}, out
+
+
+@test
+def test_drawn_refreshes_the_counters():
+    on = js_function("createBackend", SH)
+    seg = on[on.index('t === "drawn"'):]
+    seg = seg[:seg.index("} else if")]
+    assert "host.updatePrompt()" in seg, seg
+
+
+@test
+def test_html_backend_away_and_back():
+    out = _backend_run("""
+b.loaded();
+var init = posts[0];
+b.backend.draw();
+var early = posts.length;
+b.receive({rd: 1, type: "hello", path: "/about.html", title: "A"});
+var away = [awayAt, enabled, posts.slice(-1)[0]];
+b.receive({rd: 1, type: "bye"});
+var bye = [awayAt, enabled];
+b.receive({rd: 1, type: "hello", path: "/", title: "I"});
+var types = posts.map(function (p) { return p[0]; });
+return [init, early, away, bye, awayAt, enabled, types];""")
+    assert out[0] == ["init", {"mode": "use"}], out[0]
+    assert out[1] == 1, "no draw before the probe is up"
+    assert out[2] == ["/about.html", False, ["mode", {"mode": "use"}]], out[2]
+    assert out[3] == [None, False], out[3]
+    assert out[4] is None and out[5] is True
+    assert out[6][-2:] == ["mode", "draw"], out[6]
+
+
+@test
+def test_html_backend_edit_and_revert():
+    out = _backend_run("""
+b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});
+b.receive({rd: 1, type: "edit", id: null, alt: "a b c d e f g h", neu: "a X c d e f Y h",
+           anchor: {sel: "p", tag: "<p>", text: "a b"}});
+var id = Object.keys(state.data.edits)[0], ed = state.data.edits[id];
+var draw = posts.filter(function (p) { return p[0] === "draw"; }).slice(-1)[0][1].edits[0];
+b.receive({rd: 1, type: "run-click", id: id, n: 1, rect: {left: 0, top: 0, right: 1, bottom: 1}});
+var after = state.data.edits[id] && state.data.edits[id].neu;
+b.receive({rd: 1, type: "run-click", id: id, n: 0, rect: {left: 0, top: 0, right: 1, bottom: 1}});
+return [id.charAt(0), ed.sel, ed.tag, draw.id === id, draw.sel, draw.runs.length, draw.fine.length,
+        after, id in state.data.edits, calls.filter(function (c) { return c[0] !== "draw"; })];""")
+    assert out[0] == "h" and out[1] == "p" and out[2] == "<p>", out
+    assert out[3] is True and out[4] == "p", out
+    assert out[5] == 5 and out[6] == 5, out
+    assert out[7] == "a X c d e f g h", out
+    assert out[8] is False, "reverting the last run removes the edit"
+    names = [c[0] for c in out[9]]
+    assert names.count("showChange") == 2 and "save" in names, out[9]
+    assert ["showChange", "g", "Y", "This change", "Revert this"] in out[9], out[9]
+
+
+@test
+def test_html_backend_keys_and_clicks():
+    data = {"marks": {"m1": {"sec": "", "quote": "one", "occ": 0, "sel": "p", "comment": "x"}}, "edits": {}}
+    out = _backend_run("""
+b.receive({rd: 1, type: "hello", path: "/index.html", title: "T"});
+b.receive({rd: 1, type: "key", key: "z", shift: false});
+b.receive({rd: 1, type: "key", key: "z", shift: true});
+b.receive({rd: 1, type: "key", key: "y", shift: false});
+b.receive({rd: 1, type: "key", key: "Escape"});
+b.receive({rd: 1, type: "down"});
+b.receive({rd: 1, type: "mark-click", id: "m1", rect: {left: 0, top: 5, right: 1, bottom: 6}});
+b.receive({rd: 1, type: "select", quote: "two", occ: 0, rect: {left: 3, top: 0, right: 4, bottom: 1},
+           anchor: {sel: "#a"}});
+b.receive({rd: 2, type: "down"});
+b.receive({rd: 1, type: "nope"});
+return [calls, posts.slice(-1)[0][0]];""", data)
+    assert out[0] == [["undo"], ["redo"], ["redo"], ["closeBubble"], ["closeBubble"],
+                      ["showComment", "m1", 25], ["ask", "two", 13, "#a"]], out[0]
+    assert out[1] == "clear-selection", out
+
+
+@test
+def test_host_fine_runs():
+    st = js_function("start")
+    assert "fineRuns: function (alt, neu)" in st
+    assert "return ops ? buildRuns(ops) : null;" in st
+
+
 def main():
     for mod in NEW_TEST_MODULES:
         __import__(mod)

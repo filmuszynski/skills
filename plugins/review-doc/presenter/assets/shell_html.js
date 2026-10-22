@@ -5,8 +5,10 @@
  * of its own (ADR 0016). The review server binds both ports as a pair, so the
  * frame port follows from the port this page was served from.
  *
- * Phase 1 only points the frame there. Widths, modes, marks and the postMessage
- * channel to the probe arrive in Phase 3. */
+ * This file is the frame backend: the shell's marks, counters and bubbles talk to
+ * the probe inside the frame over postMessage (ADR 0017). It runs after shell.js
+ * and before DOMContentLoaded, so window.REVIEW_DOC_BACKEND is registered before
+ * shell.js's wire() calls start() and pickBackend asks for it. Keep it that way. */
 (function () {
   "use strict";
 
@@ -17,7 +19,310 @@
     return "http://" + meta.slug + ".localhost:" + port + "/" + encodeURIComponent(meta.target.entry);
   }
 
+  function originOf(url) {
+    var m = /^https?:\/\/[^\/]+/.exec(url || "");
+    return m ? m[0] : "";
+  }
+
+  /* Decision 12: comments and rewrites only live on the page the review is of. */
+  function isEntryPath(path, entry) {
+    var p;
+    try {
+      p = decodeURIComponent(path);
+    } catch (e) {
+      p = path;
+    }
+    return p === "/" || p === "/" + entry;
+  }
+
+  /* The text with changed run n put back as it was and every other run kept.
+     Runs are the coalesced ones, the same the edits counter counts. */
+  function revertedText(runs, n) {
+    var out = "", k = 0;
+    for (var i = 0; i < runs.length; i++) {
+      var r = runs[i];
+      if (r.same) { out += r.text; continue; }
+      out += k === n ? r.removed : r.added;
+      k++;
+    }
+    return out;
+  }
+
+  /* Probe rects are in the frame's viewport; bubbles are placed in the shell's. */
+  function toShell(rect, frameRect) {
+    return {left: rect.left + frameRect.left, top: rect.top + frameRect.top,
+            right: rect.right + frameRect.left, bottom: rect.bottom + frameRect.top};
+  }
+
+  function newEditId() {
+    return "h" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  /* The backend and its message handling, with the DOM kept out: env gives
+     post(type, fields), frameRect(), entry, enable(on) for the Comment and Edit
+     text buttons, and away(path or null) for the strip. Everything is read from
+     host.state.data at the moment it is needed, because undo and redo replace
+     that object wholesale. The backend never deletes a comment it could not
+     draw: the counters and the prompt count state, not stops (decision 8). */
+  function createBackend(host, env) {
+    var chosen = host.state.mode || "use";
+    var up = false, onEntry = false, due = true, opened = false;
+    var stops = [], rects = {};
+
+    function frameRect() { return env.frameRect(); }
+
+    function live() { return up && onEntry; }
+
+    function effective() { return live() ? chosen : "use"; }
+
+    function postDraw() {
+      due = false;
+      var data = host.state.data, marks = [], edits = [], id;
+      for (id in data.marks) {
+        var mk = data.marks[id];
+        marks.push({id: id, quote: mk.quote, occ: mk.occ || 0, sel: mk.sel});
+      }
+      for (id in data.edits) {
+        var ed = data.edits[id];
+        edits.push({id: id, sel: ed.sel, alt: ed.alt, neu: ed.neu,
+                    runs: host.runs(ed.alt, ed.neu), fine: host.fineRuns(ed.alt, ed.neu)});
+      }
+      env.post("draw", {marks: marks, edits: edits});
+    }
+
+    function forget() {
+      stops = [];
+      rects = {};
+    }
+
+    /* A bubble that lit a comment in the frame lets it go when it closes. */
+    function closeBubble() {
+      host.closeBubble();
+      if (opened) {
+        opened = false;
+        env.post("open", {id: null});
+      }
+    }
+
+    function changed() {
+      host.draw();
+      host.updatePrompt();
+    }
+
+    function onRunClick(m) {
+      var ed = host.state.data.edits[m.id];
+      if (!ed) return;
+      var id = m.id, rect = toShell(m.rect, frameRect());
+      var runs = host.runs(ed.alt, ed.neu);
+      if (!runs) {
+        /* The diff was refused, so the probe drew the whole text as one run. */
+        host.showChange(rect, ed.alt, ed.neu, "Before your rewrite", "Revert all", function () {
+          delete host.state.data.edits[id];
+          host.save("revert:" + id);
+          changed();
+        });
+        return;
+      }
+      var run = null, k = 0;
+      for (var i = 0; i < runs.length; i++) {
+        if (runs[i].same) continue;
+        if (k === m.n) run = runs[i];
+        k++;
+      }
+      if (!run) return;
+      var n = m.n;
+      host.showChange(rect, run.removed, run.added, "This change", "Revert this", function () {
+        var cur = host.state.data.edits[id];
+        if (!cur) return;
+        var text = revertedText(host.runs(cur.alt, cur.neu) || runs, n);
+        if (text === cur.alt) delete host.state.data.edits[id];
+        else cur.neu = text;
+        host.save("revert:" + id);
+        changed();
+      });
+    }
+
+    /* Decision 11: a new element gets its id here; the next draw carries it with
+       the selector, and the probe names the element it is holding from that. */
+    function onEdit(m) {
+      var edits = host.state.data.edits, a = m.anchor || {};
+      var id = m.id == null ? newEditId() : m.id;
+      var cur = edits[id];
+      if (m.neu === (cur ? cur.alt : m.alt)) {
+        delete edits[id];
+      } else if (cur) {
+        cur.neu = m.neu;
+      } else {
+        edits[id] = {sec: "", alt: m.alt, neu: m.neu, sel: a.sel, tag: a.tag, text: a.text};
+      }
+      host.save("edit:" + id);
+      changed();
+    }
+
+    function receive(m) {
+      if (!m || typeof m !== "object" || m.rd !== 1) return;
+      var t = m.type;
+      if (t === "hello") {
+        up = true;
+        onEntry = isEntryPath(String(m.path || ""), env.entry);
+        if (onEntry) {
+          env.away(null);
+          env.enable(true);
+          env.post("mode", {mode: chosen});
+          /* A new document has nothing drawn, and every load or bye marks a
+             draw as due, so in practice this always draws the whole state. */
+          if (due) postDraw();
+        } else {
+          forget();
+          env.post("mode", {mode: "use"});
+          env.enable(false);
+          env.away(String(m.path || ""));
+          host.updatePrompt();
+        }
+      } else if (t === "bye") {
+        up = false;
+        onEntry = false;
+        due = true;
+        opened = false;
+        forget();
+        env.enable(false);
+        env.away(null);
+        host.closeBubble();
+        host.updatePrompt();
+      } else if (t === "drawn") {
+        if (!live()) return;
+        stops = m.stops || [];
+        rects = m.rects || {};
+        /* updatePrompt runs updateCounters, so the counters wake up as soon as
+           the page has drawn. */
+        host.updatePrompt();
+      } else if (t === "select") {
+        if (!live()) return;
+        host.ask({sec: "", quote: m.quote, occ: m.occ || 0, rect: toShell(m.rect, frameRect()),
+                  clear: function () { env.post("clear-selection"); }, extra: m.anchor || {}});
+      } else if (t === "mark-click") {
+        if (!live()) return;
+        host.showComment(m.id, toShell(m.rect, frameRect()));
+      } else if (t === "run-click") {
+        if (live()) onRunClick(m);
+      } else if (t === "edit") {
+        if (live()) onEdit(m);
+      } else if (t === "key") {
+        if (m.key === "Escape") closeBubble();
+        else if (m.key === "z" && !m.shift) host.undo();
+        else if (m.key === "y" || m.key === "z") host.redo();
+      } else if (t === "down" || t === "scroll") {
+        closeBubble();
+      }
+    }
+
+    var backend = {
+      /* Always the whole state (decision 1); the id is not needed. */
+      draw: function () {
+        if (live()) postDraw();
+        else due = true;
+      },
+      stops: function (kind) {
+        var out = [];
+        for (var i = 0; i < stops.length; i++) {
+          if (kind === "all" || (kind === "comments" && stops[i].kind === "comment") ||
+              (kind === "edits" && stops[i].kind === "edit")) out.push(stops[i].key);
+        }
+        return out;
+      },
+      rect: function (key) {
+        return toShell(rects[key] || {left: 0, top: 0, right: 0, bottom: 0}, frameRect());
+      },
+      scrollTo: function (key) { env.post("scroll-to", {key: key}); },
+      open: function (id) {
+        opened = true;
+        env.post("open", {id: id});
+      },
+      isEarlier: function () { return false; },
+      /* The reviewer's choice is kept while away and comes back on the entry. */
+      mode: function (m) {
+        chosen = m;
+        if (up) env.post("mode", {mode: effective()});
+      }
+    };
+
+    return {
+      backend: backend,
+      receive: receive,
+      /* Every frame load: a new document, which answers init with hello. */
+      loaded: function () {
+        up = false;
+        onEntry = false;
+        due = true;
+        forget();
+        env.post("init", {mode: effective()});
+      }
+    };
+  }
+
   var frame = document.getElementById("review-frame");
-  var src = frameSrc(window.PRESENTER_DATA.meta, window.location);
-  if (frame && src) frame.src = src;
+  var meta = window.PRESENTER_DATA.meta;
+  var src = frameSrc(meta, window.location);
+  var origin = originOf(src);
+  var current = null, frameLoaded = false;
+
+  function onFrameMessage(ev) {
+    if (!current || !frame) return;
+    if (ev.source !== frame.contentWindow) return;
+    if (ev.origin !== origin) return;
+    current.receive(ev.data);
+  }
+
+  function post(type, fields) {
+    var w = frame && frame.contentWindow;
+    if (!w || !origin) return;
+    var m = {rd: 1, type: type}, k;
+    for (k in (fields || {})) m[k] = fields[k];
+    w.postMessage(m, origin);
+  }
+
+  if (frame && src) {
+    /* Listeners first, then the src: the frame can load before shell.js's
+       start() asks for the backend, so a load is remembered and replayed. */
+    frame.addEventListener("load", function () {
+      frameLoaded = true;
+      if (current) current.loaded();
+    });
+    window.addEventListener("message", onFrameMessage);
+    frame.src = src;
+
+    var entry = meta.target.entry;
+
+    window.REVIEW_DOC_BACKEND = function (host) {
+      var strip = document.getElementById("html-away");
+      var back = document.getElementById("html-back");
+      if (back) {
+        back.textContent = "Back to " + entry;
+        back.addEventListener("click", function () { frame.src = src; });
+      }
+      var env = {
+        entry: entry,
+        post: post,
+        frameRect: function () { return frame.getBoundingClientRect(); },
+        enable: function (on) {
+          var bs = document.querySelectorAll('.modes button[data-mode="comment"], .modes button[data-mode="edit"]');
+          for (var i = 0; i < bs.length; i++) bs[i].disabled = !on;
+        },
+        away: function (path) {
+          if (!strip) return;
+          if (path == null) { strip.hidden = true; return; }
+          var shown = path;
+          try { shown = decodeURIComponent(path); } catch (e) { /* keep it raw */ }
+          var span = strip.querySelector("span");
+          if (span) span.textContent = "You are on " + shown + ". Comments and rewrites only work on " + entry + ".";
+          strip.hidden = false;
+        }
+      };
+      current = createBackend(host, env);
+      /* Until the entry page says hello, Comment and Edit text have nothing to act on. */
+      env.enable(false);
+      if (frameLoaded) current.loaded();
+      return current.backend;
+    };
+  }
 })();

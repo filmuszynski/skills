@@ -3746,6 +3746,12 @@
         var ops = diffTokens(tokenize(alt), tokenize(neu));
         return ops ? coalesceRuns(buildRuns(ops)) : null;
       },
+      /* The same runs before coalescing: the probe applies these, so a bridge
+         word swallowed into a counted run is never deleted and retyped. */
+      fineRuns: function (alt, neu) {
+        var ops = diffTokens(tokenize(alt), tokenize(neu));
+        return ops ? buildRuns(ops) : null;
+      },
       draw: applyDataToDoc
     };
     backend = pickBackend(window.REVIEW_DOC_BACKEND, host, mdBackend);
