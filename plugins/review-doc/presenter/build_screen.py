@@ -118,10 +118,27 @@ def _real(path):
     return os.path.normcase(os.path.realpath(path))
 
 
+def _same(a, b):
+    try:
+        return os.path.samefile(a, b)
+    except (OSError, ValueError):
+        return False
+
+
 def folder_too_wide(folder):
-    """True when the frame would share the home folder or a filesystem root."""
+    """True when the frame would share a filesystem root, the home folder or a folder
+    above it. samefile catches spellings realpath leaves alone (\\\\?\\, admin shares)."""
     f = _real(folder)
-    return os.path.dirname(f) == f or f == _real(_home())
+    if os.path.dirname(f) == f:
+        return True
+    h = _real(_home())
+    while True:
+        if h == f or _same(h, folder):
+            return True
+        parent = os.path.dirname(h)
+        if parent == h:
+            return False
+        h = parent
 
 
 def check_html(target, slug=None):

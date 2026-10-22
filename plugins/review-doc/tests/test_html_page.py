@@ -279,6 +279,19 @@ def test_filesystem_root_is_refused():
 
 
 @test
+def test_home_and_its_parents_refused_in_any_windows_spelling():
+    h = use_home(new_home())
+    home = os.path.join(h, "users", "me")
+    os.makedirs(os.path.join(home, "site"))
+    with patch(build_screen, "_home", lambda: home):
+        assert build_screen.folder_too_wide(os.path.join(h, "users")), "a folder above home"
+        assert not build_screen.folder_too_wide(os.path.join(home, "site"))
+        assert not build_screen.folder_too_wide(os.path.join(h, "other"))
+        if os.name == "nt":
+            assert build_screen.folder_too_wide("\\\\?\\" + os.path.abspath(home)), "extended-length prefix"
+
+
+@test
 def test_a_file_url_is_a_local_path():
     h = use_home(new_home())
     p = _copy_single(h)
