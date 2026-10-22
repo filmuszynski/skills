@@ -1492,9 +1492,13 @@ def test_table_serialiser_and_prompt_group():
     assert 'table[data-tchg]' in js[js.index("function navTargets("):js.index("var reduceMotion")]
 
 
-def js_function(name):
-    """One top-level-free function out of shell.js, as source node can run."""
-    js = shell._asset("shell.js")
+def js_function(name, asset="shell.js"):
+    """One top-level-free function out of an asset, as source node can run.
+    "var NAME" pulls a one-statement `var NAME = ...;` instead."""
+    js = shell._asset(asset)
+    if name.startswith("var "):
+        start = js.index(name + " =")
+        return js[start:js.index(";\n", start) + 1]
     start = js.index("function %s(" % name)
     depth, i = 0, js.index("{", start)
     while True:
@@ -1513,9 +1517,11 @@ def fn_body_run(src, name):
     return src[i:j if j > 0 else len(src)]
 
 
-def run_js(names, expr, prelude=""):
+def run_js(names, expr, prelude="", asset="shell.js"):
+    """A name may be a (name, asset) pair to borrow one function from another asset."""
     import subprocess
-    src = prelude + "\n" + "\n".join(js_function(n) for n in names)
+    src = prelude + "\n" + "\n".join(
+        js_function(*n) if isinstance(n, tuple) else js_function(n, asset) for n in names)
     src += "\nprocess.stdout.write(JSON.stringify(%s));" % expr
     out = subprocess.run(["node", "-e", src], capture_output=True, timeout=30)
     assert out.returncode == 0, out.stderr.decode("utf-8", "replace")
@@ -2417,6 +2423,125 @@ def test_host_runs_match_counter():
     st = js_function("start")
     for frag in ("runs:", "showChange: changeBubble", "undo: undo", "redo: redo"):
         assert frag in st, frag
+
+
+PROBE_FNS = ["var INLINE", "var SKIP", "var NO_EDIT", "tagOf", "flatText", "pathOf", "cmpNodes",
+             "inside", "flatIndex", "nthIndex", "retext", "editTarget", "passageAnchor",
+             "cssEsc", "stepFor", "selectorFor", "startTag"]
+PROBE_PRE = """
+function textNode(s) { return {nodeType: 3, nodeValue: s, parentNode: null}; }
+function el(tag, kids, extra) {
+  var e = {nodeType: 1, tagName: tag.toUpperCase(), childNodes: [], parentNode: null,
+           attributes: [], id: "", className: "",
+           ownerDocument: {createTextNode: textNode}};
+  e.appendChild = function (k) { k.parentNode = e; e.childNodes.push(k); return k; };
+  (kids || []).forEach(function (k) { e.appendChild(typeof k === "string" ? textNode(k) : k); });
+  for (var key in (extra || {})) e[key] = extra[key];
+  return e;
+}
+var window = {}, DIFF_CELLS = 250000, BRIDGE_WORDS = 2, BRIDGE_CHARS = 24;
+"""
+RUNS_FNS = [("tokenize", "shell.js"), ("diffTokens", "shell.js"), ("isBridge", "shell.js"),
+            ("buildRuns", "shell.js"), ("coalesceRuns", "shell.js")]
+
+
+def run_probe(expr, pre="", extra=()):
+    return run_js(PROBE_FNS + list(extra), expr, PROBE_PRE + pre, asset="probe.js")
+
+
+def runs_expr(alt, neu, coalesce=True):
+    inner = "buildRuns(diffTokens(tokenize(%s), tokenize(%s)))" % (json.dumps(alt), json.dumps(neu))
+    return "coalesceRuns(%s)" % inner if coalesce else inner
+
+
+@test
+def test_flat_text_collapses_and_skips():
+    pre = 'var b = el("b", ["big"]); var p = el("p", ["  Hello\\n  ", b, "\\u00a0world ", el("script", ["x()"])]);'
+    out = run_probe("[flatText(p).text, flatText(p).at.length, flatText(p).at[6].node === b.childNodes[0]]", pre)
+    assert out == ["Hello big world", 15, True], out
+
+
+@test
+def test_flat_text_spaces_block_boundaries():
+    pre = ('var d = el("div", [el("p", ["One."]), el("p", ["Two."])]);'
+           'var d2 = el("div", [el("p", ["One. "]), el("p", ["Two."])]);')
+    out = run_probe("[flatText(d).text, flatText(d).at[4].node, flatText(d2).text]", pre)
+    assert out == ["One. Two.", None, "One. Two."], out
+
+
+@test
+def test_retext_keeps_inline_formatting():
+    pre = 'var a = el("a", ["the course"]); var p = el("p", ["Book ", a, " today"]);'
+    # one run per change: "full " lands inside the link, "today" -> "now" after it
+    sep = run_probe("(retext(p, %s), [a.childNodes[0].nodeValue, flatText(p).text, p.childNodes[1] === a])"
+                    % runs_expr("Book the course today", "Book the full course now", False),
+                    pre, RUNS_FNS)
+    assert sep == ["the full course", "Book the full course now", True], sep
+    # coalesced (the real pipeline): same paragraph text, same link object
+    out = run_probe("(retext(p, %s), [flatText(p).text, p.childNodes[1] === a])"
+                    % runs_expr("Book the course today", "Book the full course now"), pre, RUNS_FNS)
+    assert out == ["Book the full course now", True], out
+
+
+@test
+def test_retext_last_run_first():
+    alt, neu = "a b c d e f g h", "a X c d e f Y h"
+    pre = 'var p = el("p", ["a b ", el("i", ["c d e f "]), "g h"]);'
+    out = run_probe("(retext(p, %s), flatText(p).text)" % runs_expr(alt, neu), pre, RUNS_FNS)
+    assert out == neu, out
+
+
+@test
+def test_retext_into_empty_and_at_start():
+    pre = 'var p = el("p", ["world"]); var q = el("div", [el("b", [])]);'
+    out = run_probe('(retext(p, [{same: false, added: "Hello ", removed: ""}, {same: true, text: "world"}]), '
+                    'retext(q, [{same: false, added: "new", removed: ""}]), '
+                    '[p.childNodes[0].nodeValue, flatText(q).text, q.childNodes.length])', pre)
+    assert out == ["Hello world", "new", 2], out
+
+
+@test
+def test_edit_target_rules():
+    pre = ('var t1 = textNode("you"); var b = el("b", [t1]); var p = el("p", ["Hi ", b]);'
+           'var link = el("a", ["go"]); var body = el("body", [link]); var html = el("html", [body]);'
+           'var tx = textNode("lead"); var div = el("div", [tx, el("p", ["inner"])]);'
+           'var bt = textNode("ok"); var btn = el("button", [bt]); var d2 = el("div", [btn]);'
+           'var st = textNode("s"); var svg = el("svg", [el("text", [st])]); var d3 = el("div", [svg]);')
+    out = run_probe("[editTarget(t1) === p, editTarget(link.childNodes[0]) === link, "
+                    "editTarget(tx), editTarget(bt), editTarget(st), editTarget(el(\"p\", []))]", pre)
+    assert out == [True, True, None, None, None, None], out
+
+
+@test
+def test_passage_anchor():
+    pre = ('var t = textNode("x"); var strong = el("strong", [t]); var p = el("p", [strong]);'
+           'var body = el("body", [p]); var html = el("html", [el("head", []), body]);')
+    out = run_probe("[passageAnchor(t) === p, passageAnchor(html) === body]", pre)
+    assert out == [True, True], out
+
+
+@test
+def test_selector_for():
+    pre = ('var h1 = el("h1", []); var a = el("a", [], {className: "cta btn"});'
+           'var main = el("main", [h1, a], {id: "hero"}); var body = el("body", [main]);'
+           'var p1 = el("p", []), p2 = el("p", []); var m2 = el("main", [p1, p2]);'
+           'var body2 = el("body", [m2]);'
+           'var d = el("div", [], {id: "root"}); var cur = d;'
+           '["a", "b", "c", "d", "e", "f"].forEach(function (t, i) { var n = el(t, [], '
+           '{className: i === 0 ? "x" : ""}); cur.appendChild(n); cur = n; });'
+           'var odd = el("div", [el("em", [])], {id: "my id"});')
+    out = run_probe("[selectorFor(a), selectorFor(p2), selectorFor(cur), selectorFor(odd), selectorFor(body)]", pre)
+    assert out == ["#hero > a.cta", "main > p:nth-of-type(2)", "#root c > d > e > f",
+                   "#my\\ id", "body"], out
+
+
+@test
+def test_start_tag():
+    pre = ('var e = el("p", [], {attributes: [{name: "class", value: "lead"}, '
+           '{name: "contenteditable", value: "true"}, {name: "id", value: "x"}]});'
+           'var big = el("p", [], {attributes: [{name: "data-x", value: new Array(200).join("y")}]});')
+    out = run_probe("[startTag(e), startTag(big).length, startTag(big).slice(-1)]", pre)
+    assert out == ['<p class="lead" id="x">', 120, "…"], out
 
 
 def main():
