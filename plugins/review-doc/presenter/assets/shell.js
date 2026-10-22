@@ -654,6 +654,23 @@
     };
   }
 
+  var BACKEND_METHODS = ["draw", "stops", "rect", "scrollTo", "open", "isEarlier"];
+
+  /* A page script may register window.REVIEW_DOC_BACKEND, a factory taking the
+     shell's host object. Anything short of a complete backend, or a factory
+     that throws, falls back to the md one: a broken HTML script must never take
+     a Markdown page down with it. */
+  function pickBackend(factory, host, fallback) {
+    if (typeof factory !== "function") return fallback();
+    var b;
+    try { b = factory(host); } catch (e) { return fallback(); }
+    if (!b) return fallback();
+    for (var i = 0; i < BACKEND_METHODS.length; i++) {
+      if (typeof b[BACKEND_METHODS[i]] !== "function") return fallback();
+    }
+    return b;
+  }
+
   /* Every comment gets a place on the page, and none of them raises an alarm.
      An exact match is highlighted as it was. A passage that has since changed
      is highlighted where its ends still are. One that is gone entirely hangs a
@@ -3697,7 +3714,18 @@
   }
 
   function start(staleHours) {
-    backend = mdBackend();
+    /* What a frame backend may call back into. */
+    var host = {
+      state: state,
+      drift: function () { return drift; },
+      ask: askComment,
+      showComment: commentBubble,
+      showEarlier: earlierBubble,
+      closeBubble: closeBubble,
+      save: save,
+      updatePrompt: updatePrompt
+    };
+    backend = pickBackend(window.REVIEW_DOC_BACKEND, host, mdBackend);
     collectEditables();
     collectTables();
     expireOld(hoursMs(staleHours));

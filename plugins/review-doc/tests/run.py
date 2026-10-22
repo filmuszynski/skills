@@ -2092,6 +2092,50 @@ def test_shell_paths_go_through_the_backend():
     assert "filter(backend.isEarlier)" in uc and "filter(isEarlier)" not in uc
 
 
+PICK_PRELUDE = (
+    'var BACKEND_METHODS = ["draw", "stops", "rect", "scrollTo", "open", "isEarlier"];\n'
+    'function full(tag) { var b = { tag: tag }; BACKEND_METHODS.forEach(function (m) { b[m] = function () {}; }); return b; }\n'
+    'function md() { return { tag: "md" }; }\n'
+)
+
+
+@test
+def test_pick_backend_takes_a_complete_factory():
+    out = run_js(["pickBackend"],
+                 '[pickBackend(function (h) { var b = full("frame"); b.host = h.name; return b; }, {name: "host"}, md).tag,'
+                 ' pickBackend(function (h) { var b = full("frame"); b.host = h.name; return b; }, {name: "host"}, md).host]',
+                 PICK_PRELUDE)
+    assert out == ["frame", "host"], out
+
+
+@test
+def test_pick_backend_falls_back():
+    out = run_js(["pickBackend"],
+                 '[pickBackend(undefined, {}, md).tag,'
+                 ' pickBackend("nope", {}, md).tag,'
+                 ' pickBackend(function () { throw new Error("x"); }, {}, md).tag,'
+                 ' pickBackend(function () { return null; }, {}, md).tag,'
+                 ' pickBackend(function () { var b = full("f"); delete b.open; return b; }, {}, md).tag,'
+                 ' pickBackend(function () { var b = full("f"); b.draw = 1; return b; }, {}, md).tag]',
+                 PICK_PRELUDE)
+    assert out == ["md"] * 6, out
+
+
+@test
+def test_start_picks_the_backend_before_drawing():
+    st = js_function("start")
+    assert st.index("pickBackend(window.REVIEW_DOC_BACKEND, host, mdBackend)") < st.index("applyDataToDoc();")
+    assert "backend = mdBackend();" not in st
+    js = shell._asset("shell.js")
+    assert 'var BACKEND_METHODS = ["draw", "stops", "rect", "scrollTo", "open", "isEarlier"];' in js
+    h = js[js.index("var host = {"):]
+    h = h[:h.index("};")]
+    for part in ("state: state", "ask: askComment", "showComment: commentBubble",
+                 "showEarlier: earlierBubble", "closeBubble: closeBubble", "save: save",
+                 "updatePrompt: updatePrompt", "drift: function () { return drift; }"):
+        assert part in h, part
+
+
 @test
 def test_earlier_edit_picks_the_first_unclaimed_exact_element():
     pick = lambda texts, want, taken: run_js(["pickEditElement"], "pickEditElement(%s, %s, %s)" % (
