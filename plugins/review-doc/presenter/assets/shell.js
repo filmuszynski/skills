@@ -3732,7 +3732,15 @@
     load();
     if (promoteRound(state.data, D.meta.sourceMtime)) { freshRound = true; persist(); }
     baseline = JSON.stringify(state.data);
-    applyDataToDoc();
+    /* A frame backend that passed pickBackend can still fail on its first
+       draw. Without this the listeners below would never be wired. */
+    try {
+      applyDataToDoc();
+    } catch (e) {
+      if (window.console) console.error("review-doc: anchor backend failed, using the md one", e);
+      backend = mdBackend();
+      applyDataToDoc();
+    }
     setMode(state.mode);
     applyPromptVisibility();
     setZoom(state.ui.zoom || 1);

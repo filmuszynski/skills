@@ -2125,7 +2125,8 @@ def test_pick_backend_falls_back():
 def test_start_picks_the_backend_before_drawing():
     st = js_function("start")
     assert st.index("pickBackend(window.REVIEW_DOC_BACKEND, host, mdBackend)") < st.index("applyDataToDoc();")
-    assert "backend = mdBackend();" not in st
+    assert st.count("backend = mdBackend();") == 1 and st.index("catch (e)") < st.index("backend = mdBackend();"), \
+        "md is only forced in the draw fallback"
     js = shell._asset("shell.js")
     assert 'var BACKEND_METHODS = ["draw", "stops", "rect", "scrollTo", "open", "isEarlier"];' in js
     h = js[js.index("var host = {"):]
@@ -2134,6 +2135,15 @@ def test_start_picks_the_backend_before_drawing():
                  "showEarlier: earlierBubble", "closeBubble: closeBubble", "save: save",
                  "updatePrompt: updatePrompt", "drift: function () { return drift; }"):
         assert part in h, part
+
+
+@test
+def test_a_backend_that_fails_to_draw_falls_back_to_md():
+    st = js_function("start")
+    first = st.index("applyDataToDoc();")
+    guard = st[st.rindex("try {", 0, first):first + 400]
+    assert "catch (e)" in guard and "backend = mdBackend();" in guard,         "a frame backend whose first draw throws must not leave the page without listeners"
+    assert guard.index("backend = mdBackend();") < guard.rindex("applyDataToDoc();")
 
 
 @test
