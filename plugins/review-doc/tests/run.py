@@ -15,7 +15,7 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import harness  # noqa: E402
-from harness import test, RESULTS, fixture, new_home, PRESENTER  # noqa: E402
+from harness import test, RESULTS, fixture, new_home, use_home, PRESENTER  # noqa: E402
 
 import shell  # noqa: E402
 import layout_plan  # noqa: E402
@@ -1939,6 +1939,26 @@ def test_fact_rows_are_chrome_for_selection():
 
 NEW_TEST_MODULES = ["test_privacy", "test_vendor", "test_settings", "test_build", "test_version", "test_write",
                     "test_server", "test_pages_route", "test_housekeeping", "test_launch", "test_opening", "test_review_fixes", "test_page", "test_opener", "test_extension", "test_hook", "test_plugin_files", "test_repo_files", "test_docs", "test_drafts", "test_frame_unit", "test_frame_server", "test_html_page"]
+
+
+@test
+def test_css_only_rerender_promotes():
+    import build_screen, pages, time
+    h = use_home(new_home())
+    root = os.path.join(h, "site")
+    os.makedirs(root)
+    entry, css = os.path.join(root, "index.html"), os.path.join(root, "a.css")
+    io.open(entry, "w", encoding="utf-8").write("<!DOCTYPE html><html><head><title>t</title></head><body>x</body></html>")
+    io.open(css, "w", encoding="utf-8").write("p{}")
+    first = pages.read_meta(build_screen.build("html", entry)["path"])["sourceMtime"]
+    time.sleep(1.1)
+    os.utime(css, None)
+    second = pages.read_meta(build_screen.build("html", entry)["path"])["sourceMtime"]
+    out = run_js(["promoteRound"], """(function () {
+      var d = {marks: {}, edits: {}, tables: {}, steps: {}, general: "", verdict: "changes",
+               rounds: [], pending: {sentAt: 5, sourceMtime: %d}};
+      return promoteRound(d, %d); })()""" % (first, second))
+    assert out is True, (first, second)
 
 
 @test

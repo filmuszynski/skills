@@ -24,6 +24,7 @@ import os
 import pathlib
 import re
 import sys
+import time
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
 
@@ -293,7 +294,9 @@ def build_html(path, slug=None, out_dir=None):
         generated_at=datetime.datetime.now().replace(microsecond=0).isoformat(),
         target_path=real,
     )
-    built["meta"]["sourceMtime"] = int(os.path.getmtime(path) * 1000)
+    # The build time, never less than the entry's own: a fix that touches only a
+    # stylesheet leaves the entry's mtime alone, and a round must still start.
+    built["meta"]["sourceMtime"] = max(int(time.time() * 1000), int(os.path.getmtime(path) * 1000))
     built["meta"]["version"] = paths.version()
     return _write(built, source, out_dir)
 

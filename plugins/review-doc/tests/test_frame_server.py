@@ -11,6 +11,7 @@ import time
 from harness import test, new_home, HERE
 from serverkit import serving, request, frame_request
 
+import pages
 import shell
 
 FIX = os.path.join(HERE, "fixtures")
@@ -539,3 +540,36 @@ def test_selfcontained_fixture_served_with_probe():
     assert len(re.findall(PROBE_RE, text)) == 1
     script = re.search(r"<script>(.*?)</script>", original, re.S).group(0)
     assert script in text
+
+
+@test
+def test_html_page_rebuilt_on_get_when_a_served_file_changed():
+    h = new_home()
+    entry, css, page = _stale_setup(h)
+    with serving(h) as srv:
+        frame_request(srv, "GET", "/", SLUG)
+        frame_request(srv, "GET", "/css/site.css", SLUG)
+        before = os.path.getmtime(page)
+        new = time.time() + 10
+        os.utime(css, (new, new))
+        assert _review_source(srv)["mtime"] == _ms(css)
+        status, _, _ = request(srv, "GET", "/review/%s.html" % SLUG)
+        assert status == 200
+        assert os.path.getmtime(page) > before, "the page was rebuilt"
+        meta = pages.read_meta(page)
+        assert meta["slug"] == SLUG and meta["kind"] == "html"
+        assert _review_source(srv)["mtime"] == meta["sourceMtime"]
+
+
+@test
+def test_html_page_not_rebuilt_without_a_change():
+    h = new_home()
+    entry, css, page = _stale_setup(h)
+    with serving(h) as srv:
+        frame_request(srv, "GET", "/", SLUG)
+        frame_request(srv, "GET", "/css/site.css", SLUG)
+        before = os.path.getmtime(page)
+        for _ in range(2):
+            status, _, _ = request(srv, "GET", "/review/%s.html" % SLUG)
+            assert status == 200
+        assert os.path.getmtime(page) == before

@@ -7,6 +7,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import time
 
 from harness import test, new_home, use_home, patch, HERE, fixture
 
@@ -172,7 +173,7 @@ def test_build_html_writes_a_frame_page():
     assert pages.HTML_SLUG_RE.match(res["slug"]) and res["slug"].startswith("site-index-"), res["slug"]
     meta = pages.read_meta(res["path"])
     assert meta["target"]["type"] == "file" and meta["target"]["entry"] == "index.html"
-    assert meta["sourceMtime"] == int(os.path.getmtime(p) * 1000)
+    assert meta["sourceMtime"] >= int(os.path.getmtime(p) * 1000)
     again = build_screen.build("html", os.path.join(h, "site", ".", "index.html"))
     assert again["slug"] == res["slug"] and again["new"] is False, "every spelling of the path is one page"
 
@@ -371,3 +372,14 @@ def test_frame_has_no_sandbox_or_allow():
     built = layout_html.build(fixture("site_single.html"), source="/x/site_single.html", slug="x-site-single-1a2b3c")
     tag = re.search(r"<iframe\b[^>]*>", built["body_html"]).group(0)
     assert "sandbox" not in tag and "allow=" not in tag, tag
+
+
+@test
+def test_build_html_source_mtime_is_build_time():
+    h = use_home(new_home())
+    p = _copy_single(h)
+    old = time.time() - 3600
+    os.utime(p, (old, old))
+    res = build_screen.build("html", p)
+    meta = pages.read_meta(res["path"])
+    assert meta["sourceMtime"] >= int(time.time() * 1000) - 5000, meta["sourceMtime"]

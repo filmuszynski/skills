@@ -428,6 +428,8 @@ class ReviewServer(object):
         """Rebuild the page first if its source is newer than the page says.
         Any failure serves the page as it is: a stale page beats no page."""
         meta = pages.read_meta(path)
+        if (meta or {}).get("kind") == "html":
+            return self.freshen_html(slug, path, meta)
         src = source_of(meta)
         kind = CLI_KIND.get((meta or {}).get("kind"))
         if not src or not kind:
@@ -449,6 +451,44 @@ class ReviewServer(object):
             if isinstance(again, int) and now <= again:
                 return True
             return self.rebuild(kind, src, slug)
+
+    def freshen_html(self, slug, path, meta):
+        """Rebuild an HTML page whose entry or a served file changed after its build
+        (1.2), as freshen does for Markdown. The build keeps the slug and never opens
+        a browser. Any failure serves the page as it is."""
+        if not pages.HTML_SLUG_RE.match(slug or ""):
+            return False
+        target = frame_server.file_target(meta)
+        if not target:
+            return False
+        entry = os.path.realpath(os.path.join(target["root"], target["entry"]))
+        src = meta.get("source")
+        if not isinstance(src, str) or not os.path.isabs(src) or not os.path.isfile(src):
+            src = entry
+        try:
+            self.page_state(slug)  # makes the served record for this page
+            built = meta.get("sourceMtime")
+            if not isinstance(built, int) or isinstance(built, bool):
+                return False
+            if not self.html_source_mtime(slug, meta, entry) > built:
+                return False
+        except OSError:
+            return False
+        with self._guard:
+            lock = self._rebuilding.setdefault(slug, threading.Lock())
+        with lock:
+            again = (pages.read_meta(path) or {}).get("sourceMtime")
+            if isinstance(again, int) and again > built:
+                return True  # another request rebuilt it while this one waited
+            # In process: the html CLI kind needs a running server, and this is one.
+            import build_screen
+            try:
+                build_screen.build_html(src, slug=slug, out_dir=paths.pages_dir(self.home))
+            except Exception as exc:  # noqa: BLE001
+                self.log("rebuild of %s failed: %s" % (slug, exc))
+                return False
+            self.log("rebuilt %s" % slug)
+            return True
 
     def rebuild_python(self):
         # The server runs under pythonw on Windows; a child whose output is read wants
