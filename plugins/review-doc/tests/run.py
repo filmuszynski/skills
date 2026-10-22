@@ -3023,6 +3023,22 @@ return [inComment, tooLong, Object.keys(state.data.edits).length,
 
 
 @test
+def test_html_backend_keeps_an_edit_committed_by_a_mode_switch():
+    def run(delay):
+        return _backend_run(HELLO + """
+var clock = 1000;
+env.now = function () { return clock; };
+var anchor = {sel: "p", tag: "<p>", text: "a b"};
+b.backend.mode("edit");
+b.backend.mode("comment");
+clock += %d;
+b.receive({rd: 1, type: "edit", id: null, alt: "a b", neu: "a c", anchor: anchor});
+return Object.keys(state.data.edits).length;""" % delay)
+    assert run(100) == 1, "an edit right after leaving Edit text is kept"
+    assert run(5000) == 0, "a late one is dropped"
+
+
+@test
 def test_flat_text_wbr_and_img_add_nothing():
     out = run_probe('[flatText(el("p", ["super", el("wbr", []), "long"])).text, '
                     'flatText(el("p", ["a", el("img", []), "b"])).text, '

@@ -116,6 +116,13 @@
     var HELLO_WAIT = 1500;
     /* Characters an edit's before or after text may hold. */
     var EDIT_MAX = 20000;
+    /* Switching away from Edit text makes the probe commit the open edit, and
+       that edit arrives after chosen has already changed; it is still taken
+       for this long after Edit text was left. */
+    var EDIT_GRACE = 3000;
+    var leftEdit = -Infinity;
+
+    function now() { return env.now ? env.now() : Date.now(); }
 
     function frameRect() { return env.frameRect(); }
 
@@ -200,8 +207,9 @@
     function onEdit(m) {
       var edits = host.state.data.edits, a = m.anchor;
       /* The page's own scripts can post edits too: none is taken unless the
-         reviewer chose Edit text, and none large enough to bloat the state. */
-      if (chosen !== "edit") return;
+         reviewer chose Edit text (or just left it), and none large enough to
+         bloat the state. */
+      if (chosen !== "edit" && !(now() - leftEdit <= EDIT_GRACE)) return;
       if (!isStr(m.alt) || !isStr(m.neu)) return;
       if (m.alt.length > EDIT_MAX || m.neu.length > EDIT_MAX) return;
       if (!a || typeof a !== "object" || !isStr(a.sel) || !isStr(a.tag) || !isStr(a.text)) return;
@@ -347,6 +355,7 @@
       closed: closed,
       /* The reviewer's choice is kept while away and comes back on the entry. */
       mode: function (m) {
+        if (chosen === "edit" && m !== "edit") leftEdit = now();
         chosen = m;
         if (up) env.post("mode", {mode: effective()});
       }
