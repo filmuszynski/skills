@@ -2589,6 +2589,152 @@ def test_start_tag():
     assert out == ['<p class="lead" id="x">', 120, "…"], out
 
 
+# --- Phase 4 lookup helpers (fake trees plus an env over them)
+LOOKUP_FNS = ["startMatches", "tagNameOf", "commonSuffix", "commonPrefix", "contextScore",
+              "bestOccurrence", "findMark", "editHost", "findEdit", "findEarlierEdit", "pullEndBack"]
+ENV_PRE = """
+var keyN = 0;
+function mkEnv(o) {
+  o = o || {};
+  var all = o.all || [];
+  return {
+    bySel: function (s) { return (o.sel || {})[s] || null; },
+    byTag: function (n) { return all.filter(function (e) { return e.tagName.toLowerCase() === n; }); },
+    body: o.body || null,
+    flatOf: flatText,
+    origOf: function (e) { return o.orig && o.orig.has(e) ? o.orig.get(e) : null; },
+    keyOf: function (e) { if (!e.__k) e.__k = "k" + (++keyN); return e.__k; },
+    idInUse: o.ids ? function (id) { return o.ids[id] || null; } : undefined
+  };
+}
+"""
+
+
+def run_lookup(expr, pre=""):
+    return run_probe(expr, ENV_PRE + pre, LOOKUP_FNS)
+
+
+@test
+def test_start_matches():
+    out = run_probe('[startMatches("Seit 2019 begleite ich Familien", "Seit 2019 begleite ich Eltern"),'
+                    'startMatches("Seit 2019 begleite ich", "Wir begleiten seit 2019"),'
+                    'startMatches("Hi", "Hi there"), tagNameOf(\'<p class="x">\'), tagNameOf("junk")]',
+                    "", ["startMatches", "tagNameOf"])
+    assert out == [True, False, True, "p", ""], out
+
+
+@test
+def test_find_mark_step_one():
+    pre = ('var p1 = el("p", ["Alpha beta gamma. Alpha beta delta."]);'
+           'var body = el("body", [p1]); var e = mkEnv({sel: {"p": p1}, all: [p1], body: body});'
+           'var mk = {sel: "p", tag: "<p>", text: "Alpha beta gamma. Alpha beta delta.", quote: "Alpha beta",'
+           ' occ: 1, before: "", after: ""};')
+    out = run_lookup("(r = findMark(mk, e), [r.el === p1, r.at, r.step])", pre + "var r;")
+    assert out == [True, 18, 1], out
+
+
+@test
+def test_find_mark_uses_original_text_for_the_start_check():
+    pre = ('var p1 = el("p", ["Brand new start. Keep these words."]);'
+           'var body = el("body", [p1]); var orig = new Map();'
+           'orig.set(p1, flatText(el("p", ["Old opening here. Keep these words."])));'
+           'var e = mkEnv({sel: {"p": p1}, all: [p1], body: body, orig: orig});'
+           'var mk = {sel: "p", tag: "<p>", text: "Old opening here. Keep these words.", quote: "Keep these",'
+           ' occ: 0};')
+    out = run_lookup("(r = findMark(mk, e), [r.el === p1, r.at, r.step])", pre + "var r;")
+    assert out == [True, 17, 1], out
+
+
+@test
+def test_find_mark_step_two_after_an_insert():
+    pre = ('var pNew = el("p", ["A fresh paragraph appears."]); var pOld = el("p", ["The old words stay here."]);'
+           'var body = el("body", [pNew, pOld]);'
+           'var e = mkEnv({sel: {"p:nth-of-type(2)": pNew}, all: [pNew, pOld], body: body});'
+           'var mk = {sel: "p:nth-of-type(2)", tag: "<p>", text: "The old words stay here.", quote: "words stay",'
+           ' occ: 0};')
+    out = run_lookup("(r = findMark(mk, e), [r.el === pOld, r.at, r.step])", pre + "var r;")
+    assert out == [True, 8, 2], out
+
+
+@test
+def test_find_mark_step_three_picks_by_context():
+    pre = ('var p1 = el("p", ["Intro: the price is high today."]);'
+           'var d = el("div", [el("em", ["x"]), " Later the price is low tomorrow."]);'
+           'var body = el("body", [p1, d]); var e = mkEnv({all: [], body: body});'
+           'var mk = {sel: "#gone", tag: "<section>", text: "Totally different text.", quote: "the price is",'
+           ' occ: 0, before: "Later ", after: " low tomorrow."};')
+    out = run_lookup("(r = findMark(mk, e), [r.el === d, r.at, r.step, flatText(d).text.slice(r.at, r.at + 12)])",
+                     pre + "var r;")
+    assert out == [True, 8, 3, "the price is"], out
+
+
+@test
+def test_find_mark_lost():
+    pre = ('var p1 = el("p", ["Nothing to see."]); var body = el("body", [p1]);'
+           'var e = mkEnv({all: [p1], body: body});')
+    out = run_lookup('findMark({sel: "p", tag: "<p>", text: "Nothing to see.", quote: "absent words"}, e)', pre)
+    assert out is None, out
+
+
+@test
+def test_find_edit_alt_neu_and_claimed():
+    pre = ('var a = el("p", ["Old text here."]); var b = el("p", ["New text here."]);'
+           'var c = el("p", ["Other words."]); var d = el("p", ["Old text here."]);'
+           'var body = el("body", [a, b, c, d]); var e = mkEnv({sel: {"p": a}, all: [a, b, c, d], body: body});'
+           'var cl = {};'
+           'var ed = {sel: "p", tag: "<p>", alt: "Old text here.", neu: "New text here."};')
+    out = run_lookup("(r1 = findEdit(ed, e, cl), r2 = findEdit(ed, e, cl), r3 = findEdit(ed, e, cl), "
+                     "r4 = findEdit({sel: 'p', tag: '<p>', alt: 'Zzz', neu: 'Yyy'}, e, {}), "
+                     "[r1.el === a, r1.adopted, r1.step, r2.el === b, r2.adopted, r2.step, r3.el === d, r3.adopted, r4])",
+                     pre + "var r1, r2, r3, r4;")
+    assert out == [True, False, 1, True, True, 2, True, False, None], out
+
+
+@test
+def test_find_edit_earlier_only_where_neu():
+    pre = ('var a = el("p", ["Old text here."]); var b = el("p", ["New text here."]);'
+           'var body = el("body", [a, b]); var e = mkEnv({sel: {"p": a}, all: [a, b], body: body});'
+           'var ed = {sel: "p", tag: "<p>", alt: "Old text here.", neu: "New text here.", offs: [[0, 3]]};')
+    out = run_lookup("[findEarlierEdit(ed, mkEnv({sel: {p: a}, all: [a], body: body}), {}), "
+                     "(r = findEarlierEdit(ed, e, {})) && [r.el === b, r.step], "
+                     "findEarlierEdit({sel: 'p', tag: '<p>', neu: 'New text here.', offs: []}, e, {})]",
+                     pre + "var r;")
+    assert out == [None, [True, 2], None], out
+
+
+@test
+def test_pull_end_back_on_triple_click():
+    pre = ('var t1 = textNode("First para."), t2 = textNode("Second para.");'
+           'var p1 = el("p", [t1, el("em", ["tail"])]); var p2 = el("p", [t2]);'
+           'var body = el("body", [p1, p2]);'
+           'function rng(sc, so, ec, eo) { var r = {startContainer: sc, startOffset: so, endContainer: ec,'
+           ' endOffset: eo}; r.setEnd = function (n, o) { r.endContainer = n; r.endOffset = o; }; return r; }'
+           'var tail = p1.childNodes[1].childNodes[0];'
+           'var r1 = rng(t1, 0, t2, 0), r2 = rng(t1, 0, t1, 5), r3 = rng(t1, 0, p2, 0);')
+    out = run_lookup("(pullEndBack(r1), pullEndBack(r2), pullEndBack(r3), "
+                     "[r1.endContainer === tail, r1.endOffset, r2.endContainer === t1, r2.endOffset, r3.endContainer === tail])",
+                     pre)
+    assert out == [True, 4, True, 5, True], out
+
+
+@test
+def test_flat_index_memo_agrees():
+    src = js_function("flatIndex", "probe.js")
+    old = (src[:src.index("    if (node.nodeType === 3 && flat.first")] +
+           src[src.index("    var child = node.nodeType"):]).replace("function flatIndex(", "function flatIndexScan(")
+    pre = ('var tA = textNode("One  two"), tB = textNode("  three"), tC = textNode("four"), '
+           'tD = textNode(" "), tE = textNode("five");'
+           'var tree = el("div", [el("p", [tA, el("b", [tB]), tC]), tD, '
+           'el("section", [el("p", ["x"]), el("ul", [el("li", [tE])])])]);'
+           'var nodes = [tA, tB, tC, tD, tE];' + old)
+    expr = ("(f = flatText(tree), bad = [], nodes.forEach(function (n) { "
+            "for (var o = 0; o <= String(n.nodeValue).length; o++) [false, true].forEach(function (s) { "
+            "if (flatIndex(f, n, o, s) !== flatIndexScan(f, n, o, s)) bad.push([String(n.nodeValue), o, s]); }); }), "
+            "[bad, f.first.size > 0])")
+    out = run_probe(expr, pre + "var f, bad;")
+    assert out == [[], True], out
+
+
 @test
 def test_probe_listens_on_window_capture_first():
     js = shell._asset("probe.js")

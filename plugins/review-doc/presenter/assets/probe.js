@@ -38,7 +38,7 @@
      for the whole raw run; a block boundary adds a virtual space (node: null)
      unless a space is already there; the ends are trimmed. */
   function flatText(el) {
-    var chars = [], at = [];
+    var chars = [], at = [], first = new Map();
     function lastIsSpace() {
       return chars.length > 0 && chars[chars.length - 1] === " ";
     }
@@ -62,12 +62,14 @@
               if (chars.length && !lastIsSpace()) {
                 chars.push(" ");
                 at.push({node: k, off: s, len: j - s});
+                if (!first.has(k)) first.set(k, at.length - 1);
               } else if (lastIsSpace() && at[at.length - 1].node === k) {
                 at[at.length - 1].len += j - s;
               }
             } else {
               chars.push(c);
               at.push({node: k, off: j, len: 1});
+              if (!first.has(k)) first.set(k, at.length - 1);
               j++;
             }
           }
@@ -84,9 +86,12 @@
     walk(el);
     while (chars.length && chars[chars.length - 1] === " ") {
       chars.pop();
-      at.pop();
+      var gone = at.pop();
+      if (gone.node && first.get(gone.node) === at.length) first.delete(gone.node);
     }
-    return {text: chars.join(""), at: at};
+    /* `first` maps a text node to its first entry in `at`, so flatIndex need not
+       scan the whole list for every boundary point. */
+    return {text: chars.join(""), at: at, first: first};
   }
 
   function pathOf(n) {
@@ -119,7 +124,22 @@
      the top of a paragraph does not pick up the space before it. An end point
      keeps the plain result. */
   function flatIndex(flat, node, off, isStart) {
-    var last = -1, i;
+    var last = -1, i, idx;
+    if (node.nodeType === 3 && flat.first && flat.first.has(node)) {
+      /* A text node's entries are contiguous: count the ones before `off`. With
+         none counted, the point sits after the last real entry before them. */
+      i = flat.first.get(node);
+      var k = i;
+      while (k < flat.at.length && flat.at[k].node === node && flat.at[k].off < off) k++;
+      if (k === i) {
+        k = i - 1;
+        while (k >= 0 && !flat.at[k].node) k--;
+        k++;
+      }
+      idx = k;
+      if (isStart) while (idx < flat.at.length && !flat.at[idx].node) idx++;
+      return idx;
+    }
     var child = node.nodeType === 1 ? (node.childNodes[off] || null) : null;
     for (i = 0; i < flat.at.length; i++) {
       var e = flat.at[i], before;
@@ -133,7 +153,7 @@
       }
       if (before) last = i;
     }
-    var idx = last + 1;
+    idx = last + 1;
     if (isStart) while (idx < flat.at.length && !flat.at[idx].node) idx++;
     return idx;
   }
@@ -289,6 +309,173 @@
     }
     s += ">";
     return s.length > 120 ? s.slice(0, 119) + "…" : s;
+  }
+
+  /* ---------------------------------------------------------- finding again */
+
+  /* Does an element's text still begin as it did when the item was stored? Twenty
+     characters survive a typo fixed later in the sentence and still reject a
+     different paragraph. */
+  function startMatches(stored, now) {
+    stored = String(stored || "");
+    now = String(now || "");
+    var n = Math.min(20, stored.length);
+    return now.slice(0, n) === stored.slice(0, n);
+  }
+
+  /* "p" out of '<p class="lead">'; "" when it does not parse. */
+  function tagNameOf(startTag) {
+    var m = /^<\s*([a-zA-Z][a-zA-Z0-9-]*)/.exec(String(startTag || ""));
+    return m ? m[1].toLowerCase() : "";
+  }
+
+  function commonSuffix(a, b) {
+    var n = 0;
+    while (n < a.length && n < b.length && a.charAt(a.length - 1 - n) === b.charAt(b.length - 1 - n)) n++;
+    return n;
+  }
+
+  function commonPrefix(a, b) {
+    var n = 0;
+    while (n < a.length && n < b.length && a.charAt(n) === b.charAt(n)) n++;
+    return n;
+  }
+
+  /* How well the words around the quote at `at` match the stored surroundings. */
+  function contextScore(text, at, quote, before, after) {
+    return commonSuffix(String(before || ""), text.slice(0, at)) +
+           commonPrefix(String(after || ""), text.slice(at + quote.length));
+  }
+
+  /* The occurrence of `quote` in `text` whose surroundings match best; ties go to
+     the first. -1 when there is none. */
+  function bestOccurrence(text, quote, before, after) {
+    var best = -1, bestScore = -1, from = 0, at;
+    while ((at = text.indexOf(quote, from)) !== -1) {
+      var sc = contextScore(text, at, quote, before, after);
+      if (sc > bestScore) { best = at; bestScore = sc; }
+      from = at + 1;
+    }
+    return best;
+  }
+
+  /* Where a stored comment lives now. Four steps, each weaker than the last:
+     1. the stored selector, if the element still starts as it did (its original
+        text, when the probe has saved one, so the reviewer's own rewrite of the
+        start does not count against it) and still holds the quote;
+     2. the first element of the same tag that does;
+     3. the quote anywhere in the body, taking the occurrence whose surroundings
+        match best;
+     4. nowhere: null.
+     `env` is {bySel, byTag, body, flatOf, origOf}. `at` is the flat index of the
+     quote in the flat text of `el`. */
+  function findMark(mk, env) {
+    var quote = mk && mk.quote;
+    if (!quote) return null;
+    function check(el) {
+      if (!el) return null;
+      var live = env.flatOf(el), orig = env.origOf ? env.origOf(el) : null;
+      if (!startMatches(mk.text, (orig || live).text)) return null;
+      if (live.text.indexOf(quote) === -1) return null;
+      var at = nthIndex(live.text, quote, mk.occ || 0);
+      return at === -1 ? live.text.indexOf(quote) : at;
+    }
+    var el = env.bySel(mk.sel), at = check(el), i;
+    if (at !== null) return {el: el, at: at, step: 1};
+    var name = tagNameOf(mk.tag), list = name ? env.byTag(name) : [];
+    for (i = 0; i < list.length; i++) {
+      at = check(list[i]);
+      if (at !== null) return {el: list[i], at: at, step: 2};
+    }
+    var flat = env.flatOf(env.body), b = bestOccurrence(flat.text, quote, mk.before, mk.after);
+    if (b === -1) return null;
+    var k = b;
+    while (k < b + quote.length && !flat.at[k].node) k++;
+    var entry = flat.at[k];
+    if (!entry || !entry.node) return null;
+    el = passageAnchor(entry.node);
+    var f2 = env.flatOf(el);
+    /* A quote that runs across blocks is not inside the first one: widen. */
+    while (f2.text.indexOf(quote) === -1 && el.parentNode && el !== env.body) {
+      el = el.parentNode;
+      f2 = env.flatOf(el);
+    }
+    for (i = 0; i < f2.at.length; i++) {
+      if (f2.at[i].node === entry.node && f2.at[i].off === entry.off) break;
+    }
+    at = i < f2.at.length ? i : bestOccurrence(f2.text, quote, mk.before, mk.after);
+    if (at === -1) return null;
+    return {el: el, at: at, step: 3};
+  }
+
+  /* An element whose original markup reads as one of `texts`: the one already tied
+     to the rewrite (idInUse), then the stored selector, then the first of the same
+     tag in document order. Elements in `claimed` (keyed by env.keyOf, plus
+     `prefix`) are taken; a hit is claimed here. `which` is the index in `texts`. */
+  function editHost(ed, env, claimed, prefix, texts) {
+    function test(el) {
+      if (!el) return -1;
+      var f = env.origOf ? env.origOf(el) : null, t = (f || env.flatOf(el)).text, i;
+      for (i = 0; i < texts.length; i++) if (t === texts[i]) return i;
+      return -1;
+    }
+    function take(el, step, which) {
+      claimed[prefix + env.keyOf(el)] = true;
+      return {el: el, step: step, which: which};
+    }
+    var el = null, hit, i;
+    if (env.idInUse && ed.id !== undefined) {
+      el = env.idInUse(ed.id);
+      if (el && (hit = test(el)) !== -1) return take(el, 1, hit);
+    }
+    el = env.bySel(ed.sel);
+    if (el && !claimed[prefix + env.keyOf(el)] && (hit = test(el)) !== -1) return take(el, 1, hit);
+    var name = tagNameOf(ed.tag), list = name ? env.byTag(name) : [];
+    for (i = 0; i < list.length; i++) {
+      if (claimed[prefix + env.keyOf(list[i])]) continue;
+      if ((hit = test(list[i])) !== -1) return take(list[i], 2, hit);
+    }
+    return null;
+  }
+
+  /* Where a stored rewrite lives now: an element showing `alt` (still to apply) or
+     `neu` (the page already carries it, so `adopted`). Steps 1 and 2 only. */
+  function findEdit(ed, env, claimed) {
+    var h = editHost(ed, env, claimed, "", [ed.alt, ed.neu]);
+    return h ? {el: h.el, step: h.step, adopted: h.which === 1} : null;
+  }
+
+  /* An earlier round's rewrite: only where the element already shows `neu`, and
+     only when there are runs to tint. Its claims are kept apart from the current
+     rewrites', since a reviewer may rewrite the same words again. */
+  function findEarlierEdit(ed, env, claimed) {
+    if (!ed.offs || !ed.offs.length) return null;
+    var h = editHost({sel: ed.sel, tag: ed.tag}, env, claimed, "earlier:", [ed.neu]);
+    return h ? {el: h.el, step: h.step} : null;
+  }
+
+  /* A triple click ends at offset 0 of the next block. Pull the end back to the
+     end of the last text of the block the selection started in, so the passage
+     anchor is that block and not the common parent. */
+  function pullEndBack(range) {
+    if (range.endOffset !== 0) return;
+    var block = passageAnchor(range.startContainer);
+    if (!block || inside(range.endContainer, block)) return;
+    function lastText(n) {
+      var kids = n.childNodes || [], i, t;
+      for (i = kids.length - 1; i >= 0; i--) {
+        var k = kids[i];
+        if (k.nodeType === 3) {
+          if (String(k.nodeValue).length) return k;
+        } else if (k.nodeType === 1 && !SKIP[tagOf(k)]) {
+          t = lastText(k);
+          if (t) return t;
+        }
+      }
+      return null;
+    }
+    var t = lastText(block);
+    if (t) range.setEnd(t, String(t.nodeValue).length);
   }
 
   /* ------------------------------------------------------------ live wiring */
