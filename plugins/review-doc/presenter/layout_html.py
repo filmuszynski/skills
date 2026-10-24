@@ -46,7 +46,7 @@ def build(raw, source, slug, generated_at="", target_path=None):
     title = page_title(raw, os.path.basename(source_disp))
     body = ('<div class="html-stage"><div class="html-away" id="html-away" hidden><span></span>'
             '<button type="button" class="btn small" id="html-back"></button></div>'
-            '<div class="html-lost" id="html-lost" hidden><span>Not found on the page any more:</span>'
+            '<div class="html-lost" id="html-lost" hidden><span>Not shown on the page:</span>'
             '<span class="lost-pills"></span></div><iframe id="review-frame" title="%s" '
             'referrerpolicy="no-referrer"></iframe></div>' % shell._esc(title))
     footer = (

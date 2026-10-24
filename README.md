@@ -96,7 +96,7 @@ or use the terminal command:
 | `auto-open` | on, off | on | Opens each new page right after it is made |
 | `tooltips` | on, off | on | Shows the small labels that explain each button on a review page |
 | `md` | on, off | on | Markdown document pages |
-| `html` | on, off | on | HTML document pages (arriving in v1.1) |
+| `html` | on, off | on | HTML pages |
 | `plan` | on, off | on | Plan pages, made automatically when Claude writes a plan |
 | `choice` | on, off | on | Choice screens (see below) |
 

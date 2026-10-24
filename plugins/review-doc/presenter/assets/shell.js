@@ -3402,7 +3402,7 @@
      button gets no mouse events and its tooltip would never show. */
   var KIND_ROWS = [
     { key: "md", label: "Markdown documents" },
-    { key: "html", label: "HTML documents", note: "arrives in 1.2", off: true },
+    { key: "html", label: "HTML pages" },
     { key: "plan", label: "Plans" },
     { key: "choice", label: "Options and explainer screens" }
   ];
@@ -3504,7 +3504,7 @@
       function commit() {
         var update = { stale_hours: Number(hours.value), auto_open: auto.checked,
                        show_tips: tips.checked, kinds: {} };
-        KIND_ROWS.forEach(function (k) { if (!k.off) update.kinds[k.key] = boxes[k.key].checked; });
+        KIND_ROWS.forEach(function (k) { update.kinds[k.key] = boxes[k.key].checked; });
         err.hidden = true;
         hours.removeAttribute("aria-invalid");
         save.disabled = true;

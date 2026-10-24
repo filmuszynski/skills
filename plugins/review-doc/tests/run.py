@@ -2773,6 +2773,22 @@ def test_pull_end_back_keeps_a_multi_paragraph_drag():
 
 
 @test
+def test_pull_end_back_stays_in_body():
+    # Nothing visible before the end point inside body: the walk must not climb
+    # into head and end the selection on the title.
+    pre = ('var tt = textNode("T"), t1 = textNode(""), t2 = textNode("Hi");'
+           'var head = el("head", [el("title", [tt])]);'
+           'var p1 = el("p", [t1]), p2 = el("p", [t2]); var body = el("body", [p1, p2]);'
+           'var html = el("html", [head, body]);'
+           'function rng(sc, so, ec, eo) { var r = {startContainer: sc, startOffset: so, endContainer: ec,'
+           ' endOffset: eo}; r.setEnd = function (n, o) { r.endContainer = n; r.endOffset = o; }; return r; }'
+           'var r1 = rng(t1, 0, p2, 0), r2 = rng(t1, 0, body, 0);')
+    out = run_lookup("(pullEndBack(r1), pullEndBack(r2), [r1.endContainer === tt, r1.endContainer === p2,"
+                     " r1.endOffset, r2.endContainer === tt, r2.endContainer === body])", pre)
+    assert out == [False, True, 0, False, True], out
+
+
+@test
 def test_find_mark_start_check_accepts_the_live_text():
     # The comment was made after the reviewer rewrote the start: its stored text
     # is the live text, not the original.

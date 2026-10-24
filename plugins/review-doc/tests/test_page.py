@@ -160,13 +160,15 @@ def test_settings_panel_warns_before_deleting_this_page():
 
 
 @test
-def test_settings_panel_skips_html_until_v1_1():
+def test_settings_panel_sends_html():
     src = js()
     rows = src.split("var KIND_ROWS = [", 1)[1].split("];", 1)[0]
     for key in ("md", "html", "plan", "choice"):
         assert 'key: "%s"' % key in rows, key
-    assert re.search(r'key: "html"[^}]*note: "arrives in 1\.2"[^}]*off: true', rows)
-    assert "if (!k.off) update.kinds[k.key]" in fn_body(src, "openSettings"), "html is never sent"
+    row = re.search(r'\{[^}]*key: "html"[^}]*\}', rows).group(0)
+    assert 'label: "HTML pages"' in row and "note" not in row and "off" not in row, row
+    assert "update.kinds[k.key] = boxes[k.key].checked" in fn_body(src, "openSettings")
+    assert "if (!k.off)" not in fn_body(src, "openSettings"), "every kind is sent, html too"
     assert "vscode_asked" not in fn_body(src, "openSettings")
 
 
@@ -431,3 +433,14 @@ def test_settings_wears_a_drawn_gear():
     rule = css().split(".credit-gear {", 1)[1].split("}", 1)[0]
     assert "stroke: currentColor" in rule and "fill: none" in rule, rule
     assert ".credit-settings:hover .credit-gear { transform: rotate(45deg); }" in css()
+
+
+@test
+def test_settings_command_and_readme_name_html_pages():
+    here = os.path.dirname(os.path.abspath(__file__))
+    cmd = io.open(os.path.join(here, "..", "commands", "settings.md"), encoding="utf-8").read()
+    readme = io.open(os.path.join(here, "..", "..", "..", "README.md"), encoding="utf-8").read()
+    assert "| `html` | on, off | on | HTML pages |" in cmd
+    assert "| `html` | on, off | on | HTML pages |" in readme
+    for text in (cmd, readme):
+        assert "v1.1)" not in text

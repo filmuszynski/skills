@@ -484,11 +484,11 @@
       return null;
     }
     var n = range.endContainer, t = null, p;
-    while (n && !t) {
+    while (n && !t && tagOf(n) !== "BODY") {
       p = prevSibling(n);
-      while (!p && n.parentNode) {
+      while (!p && n.parentNode && tagOf(n) !== "BODY") {
         n = n.parentNode;
-        p = prevSibling(n);
+        if (tagOf(n) !== "BODY") p = prevSibling(n);  /* never walk out of body */
       }
       if (!p) break;
       t = lastText(p);

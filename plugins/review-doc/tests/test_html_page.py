@@ -370,7 +370,7 @@ def test_html_page_has_three_modes():
 def test_html_page_has_lost_strip():
     built = layout_html.build(fixture("site_single.html"), source="/x/site_single.html", slug="x-site-single-1a2b3c")
     html = shell.render(**built)
-    strip = ('<div class="html-lost" id="html-lost" hidden><span>Not found on the page any more:</span>'
+    strip = ('<div class="html-lost" id="html-lost" hidden><span>Not shown on the page:</span>'
              '<span class="lost-pills"></span></div>')
     assert strip in html
     assert html.index('id="html-away"') < html.index(strip) < html.index('<iframe id="review-frame"')
