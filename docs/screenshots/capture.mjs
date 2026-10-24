@@ -164,6 +164,30 @@ try {
   await sleep(200);
   await shoot(p, "plan");
 
+  // An HTML page: the shell's saved state carries one comment and one rewrite, as
+  // a reader would leave them, and the page draws them in its frame on load.
+  await go(p, shots.html);
+  await evaluate(p, `(() => {
+    const slug = location.pathname.split("/").pop().replace(/\\.html$/, "");
+    const lead = "Volunteers show the beds they look after and answer questions about growing on a " +
+      "small plot. The seed swap runs all day; bring what you saved last autumn.";
+    const alt = "Soup and bread at the long table from noon";
+    localStorage.setItem("plan-review-" + slug + "-v1", JSON.stringify({ mode: "comment",
+      ui: { head: true, zoom: 1 }, savedAt: Date.now(), data: {
+        steps: {}, tables: {}, choices: {}, general: "", verdict: "", rounds: [], pending: null,
+        marks: { m1: { sec: "", quote: "bring what you saved last autumn", occ: 0,
+          comment: "Say what kinds of seed are welcome: some people will ask about cuttings too.",
+          sel: "main > p:nth-of-type(1)", tag: "<p>", text: lead,
+          before: "The seed swap runs all day; ", after: "." } },
+        edits: { e1: { sec: "", alt: alt, neu: "Soup and bread at the long table from 12:30",
+          sel: "main > ul > li:nth-of-type(3)", tag: "<li>", text: alt } } } }));
+    return true; })()`);
+  await p.send("Page.reload", {});
+  await sleep(1000);
+  for (let i = 0; i < 50 && !(await evaluate(p, "!!document.getElementById('doc')")); i++) await sleep(100);
+  await sleep(2500);
+  await shoot(p, "html");
+
   await go(p, shots.choice);
   await evaluate(p, click(".pick-row"));
   await sleep(200);

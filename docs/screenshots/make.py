@@ -46,6 +46,7 @@ def main():
         "doc": render("doc", os.path.join(demo, "field-notes.md"), env),
         "plan": render("plan", os.path.join(demo, "plan.md"), env),
         "choice": render("screen", os.path.join(demo, "choice.md"), env),
+        "html": render("html", os.path.join(demo, "page.html"), env),
         "docSource": os.path.join(demo, "field-notes.md"),
         "out": HERE,
     }

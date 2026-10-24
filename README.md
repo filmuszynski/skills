@@ -1,6 +1,6 @@
 # review-doc
 
-Review Markdown documents and Claude's plans in your browser or directly in VS Code instead of the terminal.
+Review Markdown documents, Claude's plans and local HTML pages in your browser or directly in VS Code instead of the terminal.
 Comment on any passage, rewrite text in place, approve or decline sections, then paste
 one block back to Claude.
 
@@ -10,8 +10,8 @@ This repository is a small library of Claude Code skills; `review-doc` is the fi
 
 ## What it does
 
-When Claude writes a plan, or when you ask it to review a document, `review-doc` turns
-the Markdown into a page on your own machine and hands you the link. On that page you
+When Claude writes a plan, or when you ask it to review a document or an HTML page,
+`review-doc` turns it into a review page on your own machine and hands you the link. On that page you
 can:
 
 - select any passage and leave a comment;
@@ -56,6 +56,12 @@ Ask Claude to review a document:
 /vet notes.md
 ```
 
+or an HTML page:
+
+```
+/vet page.html
+```
+
 or just say "let me review notes.md in the browser". `/vet` is the one command to type;
 the plugin loads the right part for the file on its own. If another skill is also called
 `vet`, use the full name, `/review-doc:vet`. The page opens on its own and
@@ -74,6 +80,37 @@ to revise the plan.
 If the Markdown changes while its page is open, the page notices and offers to reload:
 
 ![The page offering to reload after its source changed](docs/screenshots/reload.png)
+
+## HTML review
+
+`/vet page.html` shows the page itself, with its own styles, scripts, images and
+fonts, inside the review page. Three modes sit in the header:
+
+- **Use:** the page works as usual, links and buttons included;
+- **Comment:** select any text on the page and leave a comment;
+- **Edit text:** rewrite text in place; the page underlines what changed.
+
+![An HTML page with a comment and a rewrite](docs/screenshots/html.png)
+
+Finish with Approve or Request changes and paste the answer into Claude. Claude applies
+it to the page's source. If the page is built by a script or a template, Claude changes
+the script's input and builds the page again, rather than editing the output. After a
+Request changes the page reloads itself, keeps the earlier round's comments, and lists
+anything it can no longer show in a strip under the header.
+
+Looking at the page through a small local server? Give Claude the address you see:
+
+```
+/vet http://127.0.0.1:8000/page.html
+```
+
+Claude finds the file behind it, tells you which one, and reviews that file. Only
+addresses on your own machine work, and only for servers that serve files from a
+folder. Reviewing a dev server arrives in 1.3.
+
+The page is served from its own folder, so its neighbours (stylesheets, images) load
+too. For that reason a page needs a folder of its own: one that sits directly in your
+home folder or at the top of a drive is refused.
 
 ## Settings
 
@@ -124,6 +161,12 @@ note, and paste the answer back.
   review the file again to make a new one.
 - **Pages open in VS Code although you use another editor.** Cursor and some other
   editors set `TERM_PROGRAM=vscode`. Turn `auto-open` off, or decline the extension.
+- **An HTML page is refused because of its folder.** HTML review shares the page's
+  whole folder with the frame that shows it, so a page directly in your home folder or
+  at the top of a drive is not opened. Move it into a folder of its own.
+- **An address is refused.** Only addresses on your own machine are followed, to the
+  file behind them. A dev server (one that builds the page as you work) arrives in 1.3;
+  build or save the page and review the file.
 - **Something else.** The server writes to `~/.review-doc/server.log`. Please attach
   its last lines to a bug report.
 

@@ -23,3 +23,4 @@ Lightweight MADR style: Context, Decision, Consequences, Alternatives.
 | [0016](0016-frame-origin-per-review.md) | HTML review frames each page on its own `<slug>.localhost` origin | Accepted |
 | [0017](0017-probe-and-postmessage.md) | A probe inside the reviewed page, talking to the shell by postMessage | Accepted |
 | [0019](0019-anchor-backend-seam.md) | Marks, bubbles and the counters reach the page through an anchor backend | Accepted |
+| [0020](0020-html-review-ships-proofreading-first.md) | HTML review ships proofreading first; a local address leads to its file | Accepted |

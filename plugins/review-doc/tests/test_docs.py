@@ -9,10 +9,10 @@ from harness import test, HERE
 import settings
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
-SECTIONS = ["What it does", "Install", "First use", "Plan review", "Settings",
+SECTIONS = ["What it does", "Install", "First use", "Plan review", "HTML review", "Settings",
             "Advanced: choice screens", "Troubleshooting", "Manual install",
             "License and credit"]
-SHOTS = ["page", "comment", "edit", "settings", "reload", "plan", "choice"]
+SHOTS = ["page", "comment", "edit", "settings", "reload", "plan", "html", "choice"]
 
 
 def read(*parts):
@@ -64,3 +64,20 @@ def test_contributing_and_issue_templates():
     bug = read(".github", "ISSUE_TEMPLATE", "bug_report.md")
     for needle in ("Operating system", "Python version", "review-doc version", "server.log"):
         assert needle in bug, needle
+
+
+@test
+def test_adr_index_lists_0020():
+    index = read("docs", "adr", "README.md")
+    assert "[0020](0020-html-review-ships-proofreading-first.md)" in index
+    adr = read("docs", "adr", "0020-html-review-ships-proofreading-first.md")
+    for head in ("## Context", "## Decision", "## Consequences", "## Alternatives"):
+        assert head in adr, head
+    assert "1.3" in adr and "—" not in adr
+
+
+@test
+def test_readme_covers_html_review():
+    text = read("README.md")
+    for needle in ("/vet page.html", "127.0.0.1:8000", "arrives in 1.3", "folder of its own"):
+        assert needle in text, needle
