@@ -21,6 +21,7 @@ import time
 import traceback
 from urllib.parse import quote, unquote, urlsplit
 
+import charset
 import pages
 
 FRAME_OFFSET = 100
@@ -155,14 +156,16 @@ def inject_probe(text, nonce):
 
 
 def rewrite_html(data, nonce):
-    """An HTML file's bytes with the CSP taught the nonce and the probe tag added.
-    UTF-8 when it decodes as such; otherwise byte for byte through latin-1, and the
-    page's own <meta charset> decides, as it would without us."""
+    """An HTML file's bytes with the CSP taught the nonce and the probe tag added,
+    in the file's own encoding (charset.sniff) with its BOM kept first. Bytes that
+    do not decode in it go through byte for byte as latin-1, and the browser decides."""
+    enc, bom = charset.sniff(data)
     try:
-        text, enc, ctype = data.decode("utf-8"), "utf-8", "text/html; charset=utf-8"
+        text, ctype = data[bom:].decode(enc), "text/html; charset=%s" % enc
     except UnicodeDecodeError:
-        text, enc, ctype = data.decode("latin-1"), "latin-1", "text/html"
-    return inject_probe(rewrite_meta_csp(text, nonce), nonce).encode(enc), ctype
+        text, enc, ctype = data[bom:].decode("latin-1"), "latin-1", "text/html"
+    body = inject_probe(rewrite_meta_csp(text, nonce), nonce)
+    return data[:bom] + body.encode(enc), ctype
 
 
 # ------------------------------------------------------------------ paths

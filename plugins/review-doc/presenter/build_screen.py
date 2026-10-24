@@ -31,6 +31,7 @@ from urllib.request import url2pathname
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import charset  # noqa: E402
 import drafts  # noqa: E402
 import layout_doc  # noqa: E402
 import layout_html  # noqa: E402
@@ -284,8 +285,8 @@ def build_html(path, slug=None, out_dir=None):
     real = os.path.realpath(os.path.abspath(path))
     if os.path.splitext(real)[1].lower() not in HTML:
         raise Unsupported(SUPPORTED)
-    with io.open(path, encoding="utf-8", errors="replace") as fh:
-        raw = fh.read()  # only the <title> is read from it
+    with open(path, "rb") as fh:
+        raw = charset.decode(fh.read())[0]  # only the <title> is read from it
     source = os.path.abspath(path).replace("\\", "/")
     built = layout_html.build(
         raw,

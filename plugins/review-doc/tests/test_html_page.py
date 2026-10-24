@@ -396,3 +396,16 @@ def test_build_html_source_mtime_is_build_time():
     res = build_screen.build("html", p)
     meta = pages.read_meta(res["path"])
     assert meta["sourceMtime"] >= int(time.time() * 1000) - 5000, meta["sourceMtime"]
+
+
+@test
+def test_build_html_reads_the_title_in_its_charset():
+    h = use_home(new_home())
+    d = os.path.join(h, "site")
+    os.makedirs(d, exist_ok=True)
+    for name, title in (("site_utf16.html", "Grüße"), ("site_cp1252.html", "Café € menu")):
+        p = os.path.join(d, name)
+        shutil.copy(_fixture_path(name), p)
+        res = build_screen.build("html", p)
+        page = io.open(res["path"], encoding="utf-8").read()
+        assert '<iframe id="review-frame" title="%s"' % title in page, (name, page[:300])

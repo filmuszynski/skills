@@ -148,6 +148,35 @@ def test_rewrite_html_keeps_the_encoding():
     assert out == ("<head>" + TAG + "<title>Grüße</title></head>").encode("latin-1")
 
 
+@test
+def test_sniff_charset():
+    import charset
+    assert charset.sniff(b"\xef\xbb\xbf<p>x</p>") == ("utf-8", 3)
+    assert charset.sniff(b"\xff\xfe" + "<p>x</p>".encode("utf-16-le")) == ("utf-16-le", 2)
+    assert charset.sniff(b"\xfe\xff" + "<p>x</p>".encode("utf-16-be")) == ("utf-16-be", 2)
+    assert charset.sniff(b'<meta charset="windows-1252"><p>x') == ("cp1252", 0)
+    assert charset.sniff(b'<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-2">') == ("iso8859-2", 0)
+    assert charset.sniff(b'<meta charset="utf-16"><p>x') == ("utf-8", 0), "a declared utf-16 needs a BOM"
+    assert charset.sniff(b'<meta charset="nonsense">') == ("utf-8", 0)
+    assert charset.sniff(b"<!--" + b"x" * 1100 + b'--><meta charset="windows-1252">') == ("utf-8", 0)
+    assert charset.sniff(b"") == ("utf-8", 0)
+
+
+@test
+def test_rewrite_html_keeps_utf16_and_declared_charsets():
+    with open(os.path.join(HERE, "fixtures", "site_utf16.html"), "rb") as fh:
+        out, ctype = frame_server.rewrite_html(fh.read(), N)
+    assert out.startswith(b"\xff\xfe") and ctype == "text/html; charset=utf-16-le", ctype
+    text = out[2:].decode("utf-16-le")
+    assert "<head>" + TAG in text and "<title>Grüße</title>" in text
+    with open(os.path.join(HERE, "fixtures", "site_cp1252.html"), "rb") as fh:
+        data = fh.read()
+    out, ctype = frame_server.rewrite_html(data, N)
+    assert ctype == "text/html; charset=cp1252", ctype
+    assert out.count(b"\x80") == data.count(b"\x80") == 2
+    assert out.decode("cp1252") == data.decode("cp1252").replace("<head>", "<head>" + TAG, 1)
+
+
 def _site():
     root = os.path.join(new_home(), "site")
     for rel, text in (("index.html", "<h1>i</h1>"), ("about.html", "a"), ("css/site.css", "b{}"),
