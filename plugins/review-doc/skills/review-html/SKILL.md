@@ -36,17 +36,23 @@ browser. The renderer refuses addresses, so find the file behind it first.
 1. Find the process listening on the port.
    - Windows (PowerShell): `Get-NetTCPConnection -LocalPort <port> -State Listen` gives
      `OwningProcess`; `Get-CimInstance Win32_Process -Filter "ProcessId = <pid>"` gives
-     its `CommandLine`.
+     its `CommandLine`. Windows does not show a process's working directory.
    - macOS and Linux: `lsof -nP -iTCP:<port> -sTCP:LISTEN` gives the pid;
      `ps -o command= -p <pid>` gives the command line, and
      `lsof -a -p <pid> -d cwd` its working directory.
 2. The served folder is the `--directory` value on the command line (as in
    `python -m http.server <port> --directory <folder>`), else the process's working
-   directory.
+   directory where the system shows it.
 3. The address's path, URL-decoded, names a file in that folder. A path ending in `/`
-   names its `index.html`.
-4. Check that it is the served page: `curl -s <address>` must give the same bytes as
-   the file. Failing that, the `<title>` matches and the file is the only candidate.
+   names its `index.html`. When the folder is unknown (on Windows, a server started
+   without `--directory`), search for the file's name in the current project instead,
+   skipping `node_modules` and dot folders: `Get-ChildItem -Recurse -Filter <name>` on
+   Windows, `find . -name <name>` elsewhere. Every hit is a candidate.
+4. Check that it is the served page: the bytes at the address must be the same as the
+   file's. Fetch them with `curl.exe -s <address> -o <temp file>` on Windows (plain
+   `curl` is another command in Windows PowerShell) or `curl -s <address> -o <temp file>`
+   elsewhere, and compare hashes (`Get-FileHash`, `shasum`). Failing that, the `<title>`
+   matches and the file is the only candidate.
 5. Found: say in one line which file you found and why, then render that file.
    Not found, or more than one candidate: say what you found and ask for the path.
 
@@ -80,6 +86,11 @@ element by its tag and a CSS selector, and quotes the text:
    "old text" → "new text"
 ```
 
+- **Before you edit, check whether the file is generated:** a `*.src.*` file or a
+  template next to it, a build script in its folder or the project that writes it
+  (`build.py`, a `Makefile`, `package.json` scripts), a "generated" comment near the
+  top of the file, or a note in the project's CLAUDE.md. If you are unsure,
+  ask which file is the source.
 - Find each item's source from the page path, the selector, the tag and the quoted text.
 - **If the HTML is generated (a build script, a template, a framework route or
   component), edit the generator or its source and regenerate; never edit the output.**
@@ -89,8 +100,9 @@ element by its tag and a CSS selector, and quotes the text:
   the file.
 - If a Markdown file sits next to the page with the same text (`x.md` next to
   `x.html`), apply the change to both.
-- An item marked "(the element has changed since)" was found only by its text. Look
-  at the element before applying it.
+- An item marked "(the element has changed since)" was not found on the page any more
+  (it shows as a pill). Find its quote or old text in the source; if it is gone, say so
+  instead of guessing a place.
 - An item marked "(already in the page)" is done. Leave it.
 - `Whole page:` is a comment on the page as a whole.
 - Then render once.

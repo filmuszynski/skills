@@ -28,7 +28,7 @@ Route by the file's extension, or by the address:
 |---|---|
 | `.md`, `.markdown` | Load the `review-doc:review-md` skill and follow it |
 | `.html`, `.htm` | Load the `review-doc:review-html` skill and follow it |
-| an `http://` or `https://` address on `localhost`, `127.0.0.1` or `[::1]` | Load the `review-doc:review-html` skill: it finds the file behind the address |
+| an `http://` or `https://` address on `localhost`, `127.0.0.1`, `[::1]`, `0.0.0.0`, `[::]` or `*.localhost` | Load the `review-doc:review-html` skill: it finds the file behind the address |
 | any other address | Say: "HTML review opens local files and localhost only." |
 | anything else | Say that review-doc reviews Markdown files (`.md`, `.markdown`) and HTML pages (`.html`, `.htm`) |
 

@@ -25,7 +25,8 @@ browser rather than the file.
 2. **A local address leads to its file.** When `/vet` is given an `http://` or
    `https://` address on `localhost`, `127.0.0.1` or `[::1]`, Claude finds the process
    listening on the port and the folder it serves (`--directory`, else its working
-   directory), maps the address's path to a file and checks it is the served page:
+   directory, else a search of the project for the file's name), maps the address's
+   path to a file and checks it is the served page:
    the same bytes, or the same `<title>` with no other candidate. Then it renders that
    file. When the check fails, Claude says what it found and asks for the path.
 3. **The renderer still refuses addresses** (exit 4). Finding the file is Claude's
@@ -37,7 +38,10 @@ browser rather than the file.
 
 - A page served from a folder reviews exactly like the file, with the same link.
 - The lookup needs the operating system's own tools (`Get-NetTCPConnection` on
-  Windows, `lsof` on macOS and Linux). Where they are missing, Claude asks for the path.
+  Windows, `lsof` on macOS and Linux). Windows does not show a process's working
+  directory, so there a server started without `--directory` is found by searching the
+  project for the file's name; the byte check keeps a wrong hit out. Where nothing
+  matches, Claude asks for the path.
 - Pages built by a generator are reviewed as output, and the answer is applied to the
   generator's source. The skill says so, because editing the output would be lost on
   the next build.

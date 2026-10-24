@@ -174,3 +174,38 @@ def test_descriptions_mention_html():
     for d in (plugin["description"], entry["description"]):
         assert "HTML" in d, d
     assert plugin["description"] == entry["description"]
+
+
+@test
+def test_review_html_finds_a_folder_without_directory_and_checks_bytes_on_windows():
+    # Final review I1, M4: Windows has no working directory for a process, and
+    # curl is an alias of Invoke-WebRequest in Windows PowerShell 5.1.
+    _, body = front("skills", "review-html", "SKILL.md")
+    for needle in ("Get-ChildItem -Recurse -Filter", "find . -name", "curl.exe", "Get-FileHash"):
+        assert needle in body, needle
+    assert "`curl -s <address>`" not in body
+
+
+@test
+def test_review_html_checks_for_a_generator_before_editing():
+    # Final review I2: the rule needs a step that notices a generated page.
+    _, body = front("skills", "review-html", "SKILL.md")
+    for needle in ("Before you edit, check whether the file is generated", ".src.", "package.json",
+                   "ask which file is the source"):
+        assert needle in body, needle
+
+
+@test
+def test_review_html_says_a_changed_element_was_not_found():
+    # Final review M6: step 0 is a pill, the item was not found.
+    _, body = front("skills", "review-html", "SKILL.md")
+    assert "found only by its text" not in body
+    assert "was not found on the page any more" in body
+
+
+@test
+def test_vet_follows_the_addresses_a_static_server_prints():
+    # Final review M5: http.server prints http://[::]:8000/ or http://0.0.0.0:8000/.
+    _, body = front("skills", "vet", "SKILL.md")
+    for needle in ("`0.0.0.0`", "`[::]`", "`*.localhost`"):
+        assert needle in body, needle

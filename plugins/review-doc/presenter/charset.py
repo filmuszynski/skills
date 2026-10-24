@@ -23,9 +23,13 @@ def sniff(data):
     m = _META_RE.search(data[:PRESCAN].decode("ascii", "replace"))
     if m:
         try:
-            name = codecs.lookup(m.group(1)).name
+            info = codecs.lookup(m.group(1))
         except LookupError:
             return "utf-8", 0
+        # hex, base64, rot13 are codecs too, but bytes.decode refuses them.
+        if not getattr(info, "_is_text_encoding", True):
+            return "utf-8", 0
+        name = info.name
         # A declared UTF-16 without a BOM is read as UTF-8, as the HTML standard says.
         if not name.startswith("utf-16"):
             return name, 0

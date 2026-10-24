@@ -160,12 +160,19 @@ def rewrite_html(data, nonce):
     in the file's own encoding (charset.sniff) with its BOM kept first. Bytes that
     do not decode in it go through byte for byte as latin-1, and the browser decides."""
     enc, bom = charset.sniff(data)
+    # A UTF-16 page stays UTF-16 even when damaged: 8-bit text in a 16-bit stream
+    # would shift every unit after it. Lone surrogates pass, an odd byte is replaced.
+    wide = enc.startswith("utf-16")
+    errors = "surrogatepass" if wide else "strict"
     try:
-        text, ctype = data[bom:].decode(enc), "text/html; charset=%s" % enc
+        text, ctype = data[bom:].decode(enc, errors), "text/html; charset=%s" % enc
     except UnicodeDecodeError:
-        text, enc, ctype = data[bom:].decode("latin-1"), "latin-1", "text/html"
+        if wide:
+            text, ctype = data[bom:].decode(enc, "replace"), "text/html; charset=%s" % enc
+        else:
+            text, enc, ctype = data[bom:].decode("latin-1"), "latin-1", "text/html"
     body = inject_probe(rewrite_meta_csp(text, nonce), nonce)
-    return data[:bom] + body.encode(enc), ctype
+    return data[:bom] + body.encode(enc, "surrogatepass" if wide else "strict"), ctype
 
 
 # ------------------------------------------------------------------ paths

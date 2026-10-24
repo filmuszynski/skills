@@ -315,3 +315,24 @@ def test_resolve_refuses_an_index_file_link_and_a_directory_link_out_of_the_root
         print("  (skip) cannot create a link here: %s" % exc)
         return
     assert frame_server.resolve(root, "/linked/") is None
+
+
+@test
+def test_sniff_charset_skips_codecs_that_are_not_text():
+    # Final review M1: codecs.lookup accepts hex, base64 and rot13, which do not decode bytes.
+    import charset
+    for label in ("hex", "base64", "rot13", "zip"):
+        assert charset.sniff(('<meta charset="%s">' % label).encode()) == ("utf-8", 0), label
+    assert charset.decode(b'<meta charset="hex"><title>x</title>')[0].endswith("<title>x</title>")
+
+
+@test
+def test_rewrite_html_keeps_a_damaged_utf16_page_utf16():
+    # Final review M2: a trailing odd byte or a lone surrogate must not drop the page to latin-1.
+    import codecs
+    body = "<html><head><title>Grüße</title></head><body>x</body></html>".encode("utf-16-le")
+    for data in (codecs.BOM_UTF16_LE + body + b"\n", codecs.BOM_UTF16_LE + b"\x00\xd8" + body):
+        out, ctype = frame_server.rewrite_html(data, N)
+        assert ctype == "text/html; charset=utf-16-le", ctype
+        assert out.startswith(codecs.BOM_UTF16_LE) and len(out) % 2 == 0, out[:40]
+        assert "<head>" + TAG + "<title>Grüße</title>" in out[2:].decode("utf-16-le", "replace")
