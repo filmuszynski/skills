@@ -6,6 +6,29 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-24
+
+### Added
+- HTML review. `/vet page.html` shows the page itself, with its own styles, scripts and
+  images, inside the review page. Use, Comment and Edit text sit in the header: comment
+  on selected text, rewrite text in place, then Approve or Request changes and paste the
+  answer into Claude. The page is served from its own folder on a separate local origin,
+  so its scripts never touch the review page.
+- After a Request changes the page reloads itself and keeps the earlier round. Items the
+  page can no longer show go to a strip under the header.
+- A new `review-html` skill, loaded by `/vet` for `.html` and `.htm` files. It tells
+  Claude how to apply the answer, and to change the source rather than the output when
+  the page is built by a script or a template.
+- `/vet` also takes an address on your own machine, such as
+  `http://127.0.0.1:8000/page.html`. Claude finds the file the server serves, says which
+  one, and reviews that file. Other addresses are declined; dev servers arrive in 1.3.
+- HTML pages are read and served in their own encoding, UTF-16 and declared charsets
+  such as windows-1252 included.
+
+### Changed
+- The `html` setting is live, in the settings command and in ⚙ Settings.
+- The plugin and skill descriptions name HTML pages.
+
 ## [1.1.6] - 2026-10-21
 
 ### Changed
