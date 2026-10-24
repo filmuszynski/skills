@@ -50,7 +50,7 @@ def test_no_command_shadows_a_skill():
     assert not {c[:-3] for c in commands} & skills
 
 
-SKILLS = ("vet", "review-md")
+SKILLS = ("vet", "review-md", "review-html")
 
 
 @test
@@ -90,11 +90,13 @@ def test_vet_is_the_one_command_and_review_md_stays_out_of_the_menu():
 @test
 def test_parent_skill_routes_and_handles_every_outcome():
     _, body = front("skills", "vet", "SKILL.md")
-    for needle in ("review-doc:review-md", ".markdown", ".html", "review-doc 1.2",
-                   "exit 3", "exit 4", "/review-doc:settings set", "offerExtension",
+    for needle in ("review-doc:review-md", ".markdown", ".html", "review-doc:review-html",
+                   "localhost only", "needs-server", "exit 3", "exit 4", "exit 5", "/review-doc:settings set", "offerExtension",
                    "extension.py\" install", "extension.py\" decline",
                    "approved", "revise and re-present", "declined", "CHOSEN:"):
         assert needle in body, needle
+    assert "review-doc 1.2" not in body
+    assert "The Markdown is never touched" not in body
 
 
 @test
@@ -109,7 +111,8 @@ def test_md_skill_covers_documents_plans_and_screens():
 @test
 def test_parent_skill_names_the_real_paste_back_headers():
     meta, body = front("skills", "vet", "SKILL.md")
-    for start in ("Review of the plan", "Review of the document", "Answer to", "Questions on"):
+    for start in ("Review of the plan", "Review of the document", "Review of the HTML page",
+                  "Answer to", "Questions on"):
         assert start in meta["description"], start
         assert start in body, start
     assert "Feedback on" not in meta["description"] + body
@@ -134,3 +137,40 @@ def test_parent_skill_runs_settings_show_itself():
     _, body = front("skills", "vet", "SKILL.md")
     assert 'settings.py" show' in body
     assert "run `/review-doc:settings show`" not in body
+
+
+@test
+def test_review_html_is_not_typed():
+    meta, body = front("skills", "review-html", "SKILL.md")
+    assert meta.get("user-invocable") in (False, "false"), meta
+    assert "/vet" in meta["description"] and ".html" in meta["description"], meta
+    assert "/review-doc:review-html" not in meta["description"] + body
+    assert 'build_screen.py" html' in body
+
+
+@test
+def test_review_html_skill_covers_addresses():
+    _, body = front("skills", "review-html", "SKILL.md")
+    for needle in ("Get-NetTCPConnection", "Get-CimInstance", "lsof", "--directory", "curl",
+                   "index.html", "only candidate", "ask",
+                   "Reviewing a dev server arrives in 1.3. Build or save the page and review the file."):
+        assert needle in body, needle
+
+
+@test
+def test_review_html_skill_names_the_generator_rule():
+    _, body = front("skills", "review-html", "SKILL.md")
+    for needle in ("never edit the output", "report.src.html", "build.py", "next to",
+                   "(the element has changed since)", "(already in the page)", "Never hand-edit"):
+        assert needle in body, needle
+
+
+@test
+def test_descriptions_mention_html():
+    import json
+    plugin = json.loads(read(".claude-plugin", "plugin.json"))
+    market = json.loads(read("..", "..", ".claude-plugin", "marketplace.json"))
+    entry = [p for p in market["plugins"] if p["name"] == "review-doc"][0]
+    for d in (plugin["description"], entry["description"]):
+        assert "HTML" in d, d
+    assert plugin["description"] == entry["description"]

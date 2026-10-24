@@ -1,6 +1,6 @@
 ---
 name: vet
-description: Review a Markdown document or a plan in the browser instead of the terminal, and read the user's verdict back. Use when the user asks to review, mark up, comment on, proofread or approve a document or page ("review this", "vet this", "let me mark this up", "show me that properly", "/vet"), when a review-doc hook has just handed you a plan link, when you finish a draft the user is meant to react to, and when the user pastes back feedback from a review page (a block that starts with Review of the plan, Review of the document, Answer to or Questions on).
+description: Review a Markdown document, a plan or an HTML page in the browser instead of the terminal, and read the user's verdict back. Use when the user asks to review, mark up, comment on, proofread or approve a document or page ("review this", "vet this", "let me mark this up", "show me that properly", "/vet"), when a review-doc hook has just handed you a plan link, when you finish a draft the user is meant to react to, and when the user pastes back feedback from a review page (a block that starts with Review of the plan, Review of the document, Review of the HTML page, Answer to or Questions on).
 ---
 
 # vet
@@ -22,13 +22,15 @@ Quote every path.
 
 ## Which file types
 
-Route by the file's extension:
+Route by the file's extension, or by the address:
 
-| Extension | What to do |
+| File or address | What to do |
 |---|---|
 | `.md`, `.markdown` | Load the `review-doc:review-md` skill and follow it |
-| `.html`, `.htm` | Say: "HTML review arrives in review-doc 1.2." |
-| anything else | Say that review-doc reviews Markdown files (`.md`, `.markdown`) |
+| `.html`, `.htm` | Load the `review-doc:review-html` skill and follow it |
+| an `http://` or `https://` address on `localhost`, `127.0.0.1` or `[::1]` | Load the `review-doc:review-html` skill: it finds the file behind the address |
+| any other address | Say: "HTML review opens local files and localhost only." |
+| anything else | Say that review-doc reviews Markdown files (`.md`, `.markdown`) and HTML pages (`.html`, `.htm`) |
 
 The renderer checks the same thing and refuses with exit 4 (see below), so a wrong
 guess costs nothing.
@@ -80,7 +82,8 @@ and paste the result back to you. Do not describe the page further; they can see
 |---|---|---|
 | exit 3 | `"reason": "disabled", "setting": "<name>"` | That page type is switched off in the settings, and how to switch it back on: `/review-doc:settings set <name> on` |
 | exit 4 | `"reason": "unsupported", "message": "…"` | The message, as it is |
-| any other | `"error": "…"` | The link is unavailable this time; carry on in the terminal. The Markdown is never touched by the renderer, so nothing is lost |
+| exit 5 | `"reason": "needs-server", "message": "…"` | The message. An HTML page needs the local review server, which could not start; try once more, then carry on in the terminal |
+| any other | `"error": "…"` | The link is unavailable this time; carry on in the terminal. The source is never touched by the renderer, so nothing is lost |
 
 Plans are rendered by a hook, which stays silent when `plan` is switched off. If the
 user asks why a plan got no page, run `<python> "<base>/../../presenter/settings.py" show`
@@ -95,10 +98,11 @@ starts with a header line that names the page:
 |---|---|
 | `Review of the plan "…" (…):` | a plan |
 | `Review of the document "…" (…):` | a document |
+| `Review of the HTML page "…" (…):` | an HTML page: load `review-doc:review-html` and follow "Applying an answer" |
 | `Answer to "…" (…):` | an options screen |
 | `Questions on "…" (…):` | an explainer screen |
 
-On a plan or a document, a `VERDICT:` line follows the header when the user pressed a
+On a plan, a document or an HTML page, a `VERDICT:` line follows the header when the user pressed a
 verdict button, then the comments, decisions and rewrites. Act on the verdict:
 
 - **approved** means go ahead, applying anything else in the block, and do not come
