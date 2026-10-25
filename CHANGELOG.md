@@ -6,6 +6,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-25
+
+### Fixed
+- HTML review: comment and rewrite highlights scroll with the page instead of
+  catching up after the scroll stops.
+- HTML review: in Edit text, words selected by dragging stay selected when the edit
+  starts, instead of turning into a cursor.
+- HTML review: a place where words were only removed shows the scissors, as in
+  Markdown reviews.
+
 ## [1.2.0] - 2026-10-24
 
 ### Added
