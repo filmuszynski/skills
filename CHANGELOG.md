@@ -6,6 +6,16 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-25
+
+### Changed
+- HTML review: the credit line with Settings sits after the page's own content,
+  inside the page, instead of in a fixed row below it.
+
+### Fixed
+- HTML review: in Edit text, a drag that ends outside the element it started in keeps
+  that element editable, with the selection trimmed to its edge.
+
 ## [1.2.1] - 2026-10-25
 
 ### Fixed
