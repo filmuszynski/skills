@@ -135,6 +135,17 @@
     return out;
   }
 
+  /* A selector as the probe builds it from plain names: an optional #id root,
+     then tag.class:nth-of-type(n) steps joined by " > ". A selector comes from
+     the frame and names the page chose, so anything else (escapes, long names,
+     words) is left out of the answer rather than handed to Claude. */
+  function plainSel(s) {
+    var id = "#[\\w-]{1,40}";
+    var tag = "[a-z][a-z0-9-]{0,40}(?:\\.[\\w-]{1,40})?(?::nth-of-type\\(\\d{1,4}\\))?";
+    var re = new RegExp("^(?:" + id + "|(?:" + id + "(?: > | ))?" + tag + "(?: > " + tag + ")*)$");
+    return typeof s === "string" && s.length <= 120 && re.test(s) ? s : "";
+  }
+
   /* The answer's lines for an HTML page (decisions 9 and 10): the general
      note, then each comment and rewrite in page order. Items missing from
      `order` follow, comments before rewrites. Pure. */
@@ -159,11 +170,12 @@
       var item = isMark ? marks[key.slice(2)] : edits[key.slice(2)];
       if (!isMark && item.alt === item.neu) continue;
       var f = found && has(found, key) ? found[key] : null;
-      var sel = f && f.step >= 1 && f.step <= 3 && f.sel ? f.sel : item.sel;
+      var sel = plainSel(f && f.step >= 1 && f.step <= 3 && f.sel ? f.sel : item.sel);
       var note = "";
       if (f && f.step === 0) note = " (the element has changed since)";
       else if (!isMark && f && f.adopted) note = " (already in the page)";
-      var head = (isMark ? "Passage in <" : "Rewrite in <") + tagNameOf(item.tag) + ">  (" + sel + ")" + note;
+      var head = (isMark ? "Passage in <" : "Rewrite in <") + tagNameOf(item.tag) + ">" +
+                 (sel ? "  (" + sel + ")" : "") + note;
       n++;
       if (isMark) {
         var q = (item.before ? "…" : "") + truncate(String(item.quote || ""), 90) + (item.after ? "…" : "");
@@ -706,24 +718,16 @@
   var origin = originOf(src);
   var current = null, frameLoaded = false;
 
-  /* A message is the frame's when it comes from the frame's window on the
-     frame's origin. A document that is navigating away posts its last edit and
-     its bye in pagehide (decision 12), and Chrome delivers those with source
-     null: the window that sent them is gone by then. The origin is the
-     reviewed page's own, so taking exactly those two types from a gone window
-     lets in nothing a page script in the frame could not already post. */
-  function fromFrame(ev, win, origin) {
-    if (ev.origin !== origin) return false;
-    if (ev.source === win) return true;
-    var d = ev.data;
-    return ev.source === null && !!d && typeof d === "object" &&
-      (d.type === "edit" || d.type === "bye");
-  }
+  /* The frame is talked to on a private line: every load gets a new
+     MessageChannel, whose port goes to the frame with init, on the frame's
+     origin. Everything after goes on the port, and only the port's messages
+     reach the backend; the page's own scripts never get the port (probe.js),
+     so nothing they post on the window counts. A navigating document's last
+     edit and bye still arrive on its port before the next load. */
+  var channel = null;
 
-  function onFrameMessage(ev) {
-    if (!current || !frame) return;
-    if (!fromFrame(ev, frame.contentWindow, origin)) return;
-    current.receive(ev.data);
+  function onPortMessage(ev) {
+    if (current) current.receive(ev.data);
   }
 
   function post(type, fields) {
@@ -731,7 +735,14 @@
     if (!w || !origin) return;
     var m = {rd: 1, type: type}, k;
     for (k in (fields || {})) m[k] = fields[k];
-    w.postMessage(m, origin);
+    if (type === "init") {
+      if (channel) channel.port1.close();
+      channel = new MessageChannel();
+      channel.port1.onmessage = onPortMessage;
+      w.postMessage(m, origin, [channel.port2]);
+    } else if (channel) {
+      channel.port1.postMessage(m);
+    }
   }
 
   if (frame && src) {
@@ -741,7 +752,6 @@
       frameLoaded = true;
       if (current) current.loaded();
     });
-    window.addEventListener("message", onFrameMessage);
     frame.src = src;
 
     var entry = meta.target.entry;
