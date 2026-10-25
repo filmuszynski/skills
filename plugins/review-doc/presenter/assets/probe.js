@@ -532,7 +532,7 @@
   var touched = [];         /* elements whose original markup we saved (el.__rdOrig) */
   var pending = null, pendingSel = null;   /* last committed edit the shell has not named yet */
   var editing = null, startHTML = "", startText = "";
-  var typed = false;        /* the reviewer's own keys changed the open element */
+  var typedHTML = null;     /* the open element's markup after the last trusted input */
   var host = null, root = null, boxWrap = null;
   var creditHost = null, creditRoot = null;
 
@@ -540,7 +540,7 @@
      put on Object.prototype never sees a field. */
   function post(type, fields) {
     if (!port) return;
-    var m = Object.create(null), ks = keysOf(fields || {}), i;
+    var m = {__proto__: null}, ks = keysOf(fields || {}), i;   /* a literal: no lookup a page could patch */
     m.rd = 1;
     m.type = type;
     for (i = 0; i < ks.length; i++) m[ks[i]] = fields[ks[i]];
@@ -1241,7 +1241,7 @@
     startText = flatText(el).text;
     el.setAttribute("contenteditable", "true");
     el.setAttribute("spellcheck", "false");
-    typed = false;
+    typedHTML = null;
     el.focus();
     var s = window.getSelection();
     /* A drag that ended on this element picked its words: keep them selected. */
@@ -1280,11 +1280,16 @@
       drawAgain();                              /* nothing to post in this round */
       return;
     }
-    if (!typed) {
-      /* Changed, but not by the reviewer's keys: a page script did it. */
+    if (typedHTML === null) {
+      /* Changed, but not by the reviewer's input: a page script did it. */
       if (el.innerHTML !== startHTML) el.innerHTML = startHTML;
       drawAgain();
       return;
+    }
+    if (el.innerHTML !== typedHTML) {
+      /* Changed again after the last typed input: only the typed state counts. */
+      el.innerHTML = typedHTML;
+      neu = flatText(el).text;
     }
     var sel = selectorFor(el);
     if (!el.__rdEdit) {
@@ -1338,13 +1343,13 @@
   function onBeforeInput(ev) {
     if (!editing || !inside(ev.target, editing)) return;
     ev.stopImmediatePropagation();
-    if (ev.isTrusted) typed = true;   /* a script's synthetic input does not count */
     var t = String(ev.inputType || "");
     if (t === "insertFromPaste") {
       /* Paste is plain text on one line; insertText keeps the browser's own undo. */
       ev.preventDefault();
       var text = ev.dataTransfer ? ev.dataTransfer.getData("text/plain") : "";
       if (text) document.execCommand("insertText", false, text.replace(/\s+/g, " "));
+      if (ev.isTrusted) typedHTML = editing.innerHTML;   /* the reviewer's own paste */
       return;
     }
     if (t.indexOf("format") === 0 || t === "insertParagraph" || t === "insertLineBreak" ||
@@ -1353,8 +1358,12 @@
     }
   }
 
+  /* A trusted input event follows every change the reviewer's own input makes;
+     its markup is what the edit is. A script's synthetic event does not count. */
   function onInput(ev) {
-    if (editing && inside(ev.target, editing)) ev.stopImmediatePropagation();
+    if (!editing || !inside(ev.target, editing)) return;
+    ev.stopImmediatePropagation();
+    if (ev.isTrusted) typedHTML = editing.innerHTML;
   }
 
   function onFocusOut(ev) {

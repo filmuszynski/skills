@@ -3502,30 +3502,49 @@ def test_answer_leaves_out_odd_selectors():
 
 @test
 def test_probe_posts_only_typed_edits():
-    # A rewrite counts only when the reviewer's own keys made it: a change a
-    # page script made in the open element is put back and never posted.
+    # A rewrite is what the reviewer's own input left in the element: the markup
+    # after the last trusted input event. Nothing typed: put back and not posted.
+    # Changed after the last typed input (a page script): put back to that.
     pre = """
-var el = {innerHTML: "<b>new</b>", __rdEdit: null}, editing, typed, posts = [], drew = 0;
+var el = {innerHTML: "", __rdEdit: null}, editing, typedHTML, posts = [], drew = 0;
 var startText = "old", startHTML = "<b>old</b>", pending = null, pendingSel = null;
 function stopEditing() { var e = editing; editing = null; return e; }
-function flatText() { return {text: "new"}; } function origFlat() { return {text: "old"}; }
+function flatText(e) { return {text: e.innerHTML.replace(/<[^>]*>/g, "")}; } function origFlat() { return {text: "old"}; }
 function selectorFor() { return "p"; } function startTag() { return "<p>"; }
 function post(t, f) { posts.push([t, f.neu]); } function drawAgain() { drew++; }
-function go(t) { editing = el; typed = t; el.innerHTML = "<b>new</b>"; posts = []; drew = 0; commit();
+function go(snap, now) { editing = el; typedHTML = snap; el.innerHTML = now; posts = []; drew = 0; commit();
   return [posts, drew, el.innerHTML]; }
 """
-    out = run_js(["commit"], "[go(false), go(true)]", pre, asset="probe.js")
-    assert out == [[[], 1, "<b>old</b>"], [[["edit", "new"]], 0, "<b>new</b>"]], out
+    out = run_js(["commit"], "[go(null, '<b>new</b>'), go('<b>new</b>', '<b>new</b>'), "
+                 "go('<b>new</b>', '<b>new SCRIPTED</b>')]", pre, asset="probe.js")
+    assert out == [[[], 1, "<b>old</b>"], [[["edit", "new"]], 0, "<b>new</b>"],
+                   [[["edit", "new"]], 0, "<b>new</b>"]], out
     pre = """
-var el = {}, editing = el, typed = false;
+var el = {innerHTML: "<b>x</b>"}, editing = el, typedHTML = null;
 function inside(a, r) { return a === r; }
-function ev(trusted) { return {isTrusted: trusted, inputType: "insertText", target: el,
-  stopImmediatePropagation: function () {}, preventDefault: function () {}}; }
+function ev(trusted) { return {isTrusted: trusted, target: el, stopImmediatePropagation: function () {}}; }
 """
-    out = run_js(["onBeforeInput"], "(onBeforeInput(ev(false)), [typed, (onBeforeInput(ev(true)), typed)])",
+    out = run_js(["onInput"], "(onInput(ev(false)), [typedHTML, (onInput(ev(true)), typedHTML)])",
                  pre, asset="probe.js")
-    assert out == [False, True], out
-    assert "typed = false;" in js_function("startEdit", "probe.js")
+    assert out == [None, "<b>x</b>"], out
+    assert "typedHTML = null;" in js_function("startEdit", "probe.js")
+    bi = js_function("onBeforeInput", "probe.js")
+    assert bi.index('document.execCommand("insertText"') < bi.index("typedHTML = editing.innerHTML"), \
+        "a paste is the reviewer's own input"
+
+
+@test
+def test_probe_post_looks_nothing_up_after_load():
+    # A page that replaces Object.create (or Object.keys) after load cannot shape
+    # what the probe posts.
+    pre = """
+var apply = Reflect.apply, keysOf = Object.keys, sent = [], port = {};
+var portPost = function (m) { sent.push([Object.getPrototypeOf(m) === null, m.type, m.x]); };
+Object.create = function () { return {get type() { return "edit"; }, set type(v) {}}; };
+Object.keys = function () { return []; };
+"""
+    out = run_js(["post"], "(post('scroll', {x: 3}), sent)", pre, asset="probe.js")
+    assert out == [[True, "scroll", 3]], out
 
 
 @test
