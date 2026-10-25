@@ -571,12 +571,15 @@
   /* ---------------------------------------------------------------- the layer */
 
   var LAYER_CSS =
-    ".box { position: fixed; box-sizing: border-box; pointer-events: none; margin: 0; padding: 0; }\n" +
+    ".box { position: absolute; box-sizing: border-box; pointer-events: none; margin: 0; padding: 0; }\n" +
     ".comment { background: rgba(217,166,46,.22); border-bottom: 2px solid #D9A62E; }\n" +
     ".comment.open { background: rgba(217,166,46,.45); }\n" +
     ".run { background: rgba(240,132,78,.26); border-bottom: 2px solid #F0844E; }\n" +
     ".run.open { background: rgba(240,132,78,.45); }\n" +
     ".run.caret { background: #F0844E; border: 0; }\n" +
+    /* md's cut mark: the scissors over a place where words were only removed. */
+    ".run.caret::after { content: \"\\2702\"; position: absolute; left: 4px; top: -7px;" +
+    " font: 9px/1 sans-serif; color: #B8500F; }\n" +
     /* Earlier rounds: the tint of md's mark.prev-comment and mark.prev-edit, no line. */
     ".prev-comment { background: rgba(217, 166, 46, .11); }\n" +
     ".prev-comment.open { background: rgba(217, 166, 46, .2); }\n" +
@@ -593,12 +596,15 @@
     "}\n";
 
   /* One element on <html>, its shadow root closed so neither the page's CSS nor
-     its scripts reach the boxes; it never takes a pointer event. A page that
-     rewrites <html> may drop it, so every redraw puts it back. */
+     its scripts reach the boxes; it never takes a pointer event. It is a
+     zero-size box at the page origin, so the page's own scroll carries the boxes
+     with the text. A page that rewrites <html> may drop it, so every redraw puts
+     it back. */
   function layer() {
     if (!host) {
       host = document.createElement("review-doc-layer");
-      var props = [["all", "initial"], ["position", "fixed"], ["inset", "0"],
+      var props = [["all", "initial"], ["position", "absolute"], ["left", "0"], ["top", "0"],
+                   ["width", "0"], ["height", "0"], ["overflow", "visible"],
                    ["z-index", "2147483647"], ["pointer-events", "none"]];
       for (var i = 0; i < props.length; i++) host.style.setProperty(props[i][0], props[i][1], "important");
       root = host.attachShadow({mode: "closed"});
@@ -675,6 +681,8 @@
     if (host.style.getPropertyValue("opacity") !== op) host.style.setProperty("opacity", op, "important");
     while (boxWrap.lastChild) boxWrap.removeChild(boxWrap.lastChild);
     boxes = [];
+    /* Rects are viewport ones; the boxes are placed from the layer's own corner. */
+    var o = host.getBoundingClientRect();
     var firsts = {}, pass, i, j;
     for (pass = 0; pass < 2; pass++) {
       for (i = 0; i < stops.length; i++) {
@@ -690,8 +698,8 @@
                         (s.caret ? " caret" : "") +
                         (isOpen(s) ? " open" : "") +
                         (pulseKey === s.key ? " is-target" : "");
-          d.style.left = r.left + "px";
-          d.style.top = r.top + "px";
+          d.style.left = (r.left - o.left) + "px";
+          d.style.top = (r.top - o.top) + "px";
           d.style.width = (r.right - r.left) + "px";
           d.style.height = (r.bottom - r.top) + "px";
           boxWrap.appendChild(d);
@@ -1151,7 +1159,13 @@
     el.setAttribute("contenteditable", "true");
     el.setAttribute("spellcheck", "false");
     el.focus();
-    var r = caretAt(x, y), s = window.getSelection();
+    var s = window.getSelection();
+    /* A drag that ended on this element picked its words: keep them selected. */
+    if (s && !s.isCollapsed && s.rangeCount) {
+      var g = s.getRangeAt(0);
+      if (inside(g.startContainer, el) && inside(g.endContainer, el)) return;
+    }
+    var r = caretAt(x, y);
     if (r && s && inside(r.startContainer, el)) {
       s.removeAllRanges();
       s.addRange(r);
@@ -1343,9 +1357,11 @@
     return false;
   }
 
+  /* A scroll that moves the marked text redraws at once, so the hit areas and an
+     inner scroller's boxes keep up with it; any other scroll waits for soon(). */
   function onScroll(ev) {
-    soon();
-    if (!movesStops(ev && ev.target)) return;
+    if (!movesStops(ev && ev.target)) { soon(); return; }
+    redraw();
     var now = Date.now();
     if (now - lastScrollPost >= 200) {
       lastScrollPost = now;

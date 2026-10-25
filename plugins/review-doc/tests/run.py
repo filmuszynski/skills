@@ -3267,8 +3267,6 @@ def test_probe_scroll_posts_only_for_the_page_or_a_stop_scroller():
                  "movesStops(document.body), movesStops(carousel), movesStops(holder), movesStops({})]",
                  pre, asset="probe.js")
     assert out == [True, True, True, False, True, False], out
-    on = js_function("onScroll", "probe.js")
-    assert on.index("soon();") < on.index("movesStops(ev && ev.target)"), "every scroll still redraws"
 
 
 @test
@@ -3290,6 +3288,82 @@ def test_probe_escape_without_typing_keeps_the_markup():
     out = run_js(["cancelEdit"], "(function () { cancelEdit(); var a = [sets, drew]; editing = el; "
                  "el._h = '<b>y</b>'; cancelEdit(); return [a, sets, drew, el._h]; })()", pre, asset="probe.js")
     assert out == [[0, 1], 1, 2, "<b>x</b>"], out
+
+
+@test
+def test_probe_scroll_redraws_at_once_when_it_moves_stops():
+    # A scroll that moves the marked text redraws in the same frame; any other
+    # scroll still gets the coalesced redraw.
+    pre = ("var n = {soon: 0, redraw: 0}, lastScrollPost = 0, a;"
+           "function soon() { n.soon++; } function redraw() { n.redraw++; } function post() {}"
+           "function movesStops(t) { return t === 'stops'; }")
+    out = run_js(["onScroll"], "(onScroll({target: 'other'}), a = [n.soon, n.redraw], "
+                 "onScroll({target: 'stops'}), [a, n.soon, n.redraw])", pre, asset="probe.js")
+    assert out == [[1, 0], 1, 1], out
+
+
+@test
+def test_probe_boxes_sit_in_page_coordinates():
+    # The layer is pinned to the page origin, so the page's own scroll carries the
+    # boxes with the text instead of leaving them behind until the next redraw.
+    pre = """
+var drawnOnce = true, mode = "edit", openId = null, pulseKey = null, boxes = [], redrawTimer = null;
+var host = {style: {getPropertyValue: function () { return "1"; }, setProperty: function () {}},
+            getBoundingClientRect: function () { return {left: -4, top: -500}; }};
+var kids = [];
+var boxWrap = {get lastChild() { return kids[kids.length - 1] || null; },
+               removeChild: function () { kids.pop(); }, appendChild: function (d) { kids.push(d); }};
+function layer() {}
+var document = {createElement: function () { return {style: {}}; }};
+var stops = [{key: "a", kind: "comment", id: 1}];
+function rectsOf() { return [{left: 10, right: 50, top: 100, bottom: 120}]; }
+function isOpen() { return false; }
+function postRects() {}
+"""
+    out = run_js(["redraw"], "(redraw(), [kids[0].style.left, kids[0].style.top, boxes[0].rect.top])",
+                 pre, asset="probe.js")
+    assert out == ["14px", "600px", 100], out
+    js = shell._asset("probe.js")
+    assert ".box { position: absolute;" in js[js.index("var LAYER_CSS"):js.index("function layer(")]
+    lay = js_function("layer", "probe.js")
+    assert '["position", "absolute"]' in lay and '"inset"' not in lay, "a zero-size host at the page origin"
+
+
+@test
+def test_probe_edit_keeps_a_dragged_selection():
+    # Dragging over words in Edit text ends in a click on their element: the edit
+    # starts with those words still selected, not a caret at the mouseup point.
+    pre = """
+var removed = 0, added = null, sel, editing, startHTML, startText;
+function saveOrig() {} function flatText() { return {text: "t"}; }
+function inside(a, root) { for (var n = a; n; n = n.parentNode) if (n === root) return true; return false; }
+var el = {innerHTML: "x", setAttribute: function () {}, focus: function () {}};
+var txt = {parentNode: el}, far = {parentNode: null};
+function caretAt() { return {startContainer: txt, caret: true}; }
+var window = {getSelection: function () { return sel; }};
+function mk(collapsed, sc, ec) {
+  return {isCollapsed: collapsed, rangeCount: 1,
+          getRangeAt: function () { return {startContainer: sc, endContainer: ec}; },
+          removeAllRanges: function () { removed++; }, addRange: function (r) { added = r; }};
+}
+function go(collapsed, sc, ec) {
+  sel = mk(collapsed, sc, ec); removed = 0; added = null;
+  startEdit(el, 1, 1);
+  return [removed, !!(added && added.caret)];
+}
+"""
+    out = run_js(["startEdit"], "[go(false, txt, txt), go(true, txt, txt), go(false, txt, far)]",
+                 pre, asset="probe.js")
+    assert out == [[0, False], [1, True], [1, True]], out
+
+
+@test
+def test_probe_cut_shows_the_scissors():
+    # A rewrite that only removed words shows the same scissors as md's cut mark.
+    js = shell._asset("probe.js")
+    css = js[js.index("var LAYER_CSS"):js.index("function layer(")]
+    assert '.run.caret::after { content: \\"\\\\2702\\";' in css, css
+    assert "color: #B8500F;" in css
 
 
 @test
