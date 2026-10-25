@@ -3419,6 +3419,45 @@ function ev(t) { return {type: "click", target: t, stopImmediatePropagation: fun
 
 
 @test
+def test_probe_edit_drag_ending_outside_keeps_its_element():
+    # A drag that starts in a paragraph and ends outside it clicks on a common
+    # ancestor: the paragraph where it started becomes (or stays) the edit, and
+    # the selection is trimmed to its edge so it can be typed over.
+    pre = """
+var body = {nodeType: 1}, P = {nodeType: 1, parentNode: body, childNodes: [1, 2, 3]}, Q = {nodeType: 1, parentNode: body};
+var txt = {nodeType: 3, parentNode: P}, out = {nodeType: 3, parentNode: body};
+var editing = null, started = [], commits = 0, sel, ends;
+function inside(a, root) { for (var n = a; n; n = n.parentNode) if (n === root) return true; return false; }
+function editTarget(n) { var e = n && n.nodeType === 3 ? n.parentNode : n; return e === P || e === Q ? e : null; }
+function commit() { commits++; editing = null; }
+function startEdit(el) { started.push(el === P ? "P" : "Q"); editing = el; }
+var window = {getSelection: function () { return sel; }};
+function mk(collapsed, anchor, sc, ec) {
+  return {isCollapsed: collapsed, anchorNode: anchor, rangeCount: 1,
+    getRangeAt: function () { return {startContainer: sc, endContainer: ec, cloneRange: function () {
+      var c = {startContainer: sc, endContainer: ec};
+      c.setStart = function (n, o) { c.startContainer = n; c.so = o; };
+      c.setEnd = function (n, o) { c.endContainer = n; c.eo = o; };
+      return c; }}; },
+    removeAllRanges: function () {}, addRange: function (r) { ends.push([r.endContainer === P, r.eo]); }};
+}
+function click(t) { editClick({target: t, clientX: 1, clientY: 1}); }
+"""
+    out = run_js(["clampSelection", "editClick"], """(function () {
+  var r = [];
+  ends = []; sel = mk(false, txt, txt, out); click(body);
+  r.push([started.slice(), commits, ends.slice()]);
+  ends = []; sel = mk(false, txt, txt, out); click(body);
+  r.push([started.slice(), commits, ends.slice()]);
+  ends = []; sel = mk(true, txt, txt, txt); click(Q);
+  r.push([started.slice(), commits, ends.slice()]);
+  return r; })()""", pre, asset="probe.js")
+    assert out == [[["P"], 0, [[True, 3]]],
+                   [["P"], 0, [[True, 3]]],
+                   [["P", "Q"], 1, []]], out
+
+
+@test
 def test_probe_emptied_element_keeps_a_clickable_box():
     pre = """
 function getComputedStyle(e) { return {lineHeight: e._lh}; }

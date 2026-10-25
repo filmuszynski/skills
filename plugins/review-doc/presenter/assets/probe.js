@@ -1269,11 +1269,34 @@
     drawAgain();
   }
 
+  /* Trims the selection to el, so a drag that ran past its edge still selects
+     only words that can be typed over. */
+  function clampSelection(el) {
+    var s = window.getSelection();
+    if (!s || !s.rangeCount) return;
+    var r = s.getRangeAt(0), c = r.cloneRange(), moved = false;
+    if (!inside(r.startContainer, el)) { c.setStart(el, 0); moved = true; }
+    if (!inside(r.endContainer, el)) { c.setEnd(el, el.childNodes.length); moved = true; }
+    if (!moved) return;
+    s.removeAllRanges();
+    s.addRange(c);
+  }
+
+  /* A drag that ends outside its element clicks on a common ancestor, so the
+     element is the one the selection started in, not the click's target. */
   function editClick(ev) {
-    if (editing && inside(ev.target, editing)) return;   /* moving the caret */
+    var s = window.getSelection();
+    var from = s && !s.isCollapsed && s.anchorNode ? s.anchorNode : null;
+    var t = from || ev.target;
+    if (editing && inside(t, editing)) {   /* moving the caret, or selecting */
+      if (from) clampSelection(editing);
+      return;
+    }
     if (editing) commit();
-    var el = editTarget(ev.target);
-    if (el) startEdit(el, ev.clientX, ev.clientY);
+    var el = editTarget(t);
+    if (!el) return;
+    if (from) clampSelection(el);
+    startEdit(el, ev.clientX, ev.clientY);
   }
 
   function onBeforeInput(ev) {
