@@ -495,6 +495,9 @@ main { min-height: 0; }
 #doc:has(> .html-stage) { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .html-stage { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 #review-frame { display: block; width: 100%; flex: 1 1 auto; min-height: 0; border: 0; background: #fff; }
+/* On an HTML page the credit line sits after the page's own content, inside the
+   frame (probe.js); the shell's copy stays in the DOM as its source. */
+#doc:has(> .html-stage) > .credit { display: none; }
 
 /* -------------------------------------------------------------- document */
 

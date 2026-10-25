@@ -77,6 +77,12 @@
     return isStr(id) && !!map && Object.prototype.hasOwnProperty.call(map, id);
   }
 
+  /* The shell's credit capsule, which the probe draws after the page's content. */
+  function creditHtml(doc) {
+    var c = doc.querySelector(".credit .credit-capsule");
+    return c ? c.outerHTML : "";
+  }
+
   function cleanRect(r) {
     if (!r || typeof r !== "object") return null;
     if (!isNum(r.left) || !isNum(r.top) || !isNum(r.right) || !isNum(r.bottom)) return null;
@@ -587,6 +593,9 @@
         host.showEarlier(m.key, toShell(er, frameRect()));
       } else if (t === "select") {
         if (live()) onSelect(m);
+      } else if (t === "settings") {
+        var sr = cleanRect(m.rect);
+        if (sr) host.openSettings(toShell(sr, frameRect()));
       } else if (t === "mark-click") {
         var r = cleanRect(m.rect);
         if (!live() || !own(host.state.data.marks, m.id) || !r) return;
@@ -686,7 +695,7 @@
           env.enable(false);
           env.away("");   /* no path known: "another page" */
         }, HELLO_WAIT);
-        env.post("init", {mode: effective()});
+        env.post("init", {mode: effective(), credit: env.credit()});
       }
     };
   }
@@ -754,6 +763,7 @@
       }
       var env = {
         entry: entry,
+        credit: function () { return creditHtml(document); },
         post: post,
         frameRect: function () { return frame.getBoundingClientRect(); },
         enable: function (on) {

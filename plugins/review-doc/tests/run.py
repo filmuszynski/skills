@@ -2966,6 +2966,7 @@ var host = {state: state,
   showEarlier: function (k, r) { calls.push(["showEarlier", k, r.top]); },
   showChange: function (r, was, now, head, label, fn) { calls.push(["showChange", was, now, head, label]); fn(); },
   closeBubble: function () { calls.push(["closeBubble"]); },
+  openSettings: function (r) { calls.push(["openSettings", r.left, r.top]); },
   save: function (k) { calls.push(["save", k]); },
   draw: function () { calls.push(["draw"]); b.backend.draw(); },
   updatePrompt: function () { calls.push(["updatePrompt"]); },
@@ -2977,6 +2978,7 @@ var host = {state: state,
   scope: function () { return scope; },
   drift: function () { return driftMap; }};
 var env = {entry: "index.html",
+  credit: function () { return '<span class="credit-capsule">C</span>'; },
   post: function (type, f) { posts.push([type, f || {}]); },
   frameRect: function () { return {left: 10, top: 20, right: 810, bottom: 620}; },
   enable: function (on) { enabled = on; },
@@ -3080,7 +3082,7 @@ var bye = [awayAt, enabled];
 b.receive({rd: 1, type: "hello", path: "/", title: "I"});
 var types = posts.map(function (p) { return p[0]; });
 return [init, early, away, bye, awayAt, enabled, types];""")
-    assert out[0] == ["init", {"mode": "use"}], out[0]
+    assert out[0] == ["init", {"mode": "use", "credit": '<span class="credit-capsule">C</span>'}], out[0]
     assert out[1] == 1, "no draw before the probe is up"
     assert out[2] == ["/about.html", False, ["mode", {"mode": "use"}]], out[2]
     assert out[3] == [None, False], out[3]
@@ -3313,7 +3315,7 @@ var host = {style: {getPropertyValue: function () { return "1"; }, setProperty: 
 var kids = [];
 var boxWrap = {get lastChild() { return kids[kids.length - 1] || null; },
                removeChild: function () { kids.pop(); }, appendChild: function (d) { kids.push(d); }};
-function layer() {}
+function layer() {} function placeCredit() {}
 var document = {createElement: function () { return {style: {}}; }};
 var stops = [{key: "a", kind: "comment", id: 1}];
 function rectsOf() { return [{left: 10, right: 50, top: 100, bottom: 120}]; }
@@ -3364,6 +3366,56 @@ def test_probe_cut_shows_the_scissors():
     css = js[js.index("var LAYER_CSS"):js.index("function layer(")]
     assert '.run.caret::after { content: \\"\\\\2702\\";' in css, css
     assert "color: #B8500F;" in css
+
+
+@test
+def test_html_credit_goes_into_the_frame():
+    # The shell's own credit line is hidden on HTML pages; the probe draws a copy
+    # after the page's content, and its Settings part opens the shell's panel.
+    out = _backend_run("""
+b.loaded();
+var init = posts.filter(function (p) { return p[0] === "init"; }).slice(-1)[0][1];
+b.receive({rd: 1, type: "settings", rect: {left: 5, top: 30, right: 50, bottom: 40}});
+b.receive({rd: 1, type: "settings", rect: {left: "x"}});
+b.receive({rd: 1, type: "settings"});
+return [init.credit, calls];""")
+    assert out[0] == '<span class="credit-capsule">C</span>', out
+    assert out[1] == [["openSettings", 15, 50]], out[1]
+    css = shell._asset("shell.css")
+    assert "#doc:has(> .html-stage) > .credit { display: none; }" in css
+    pre = ('var cap = {outerHTML: "<span class=\\"credit-capsule\\">x</span>"};'
+           'function doc(c) { return {querySelector: function (q) { return q === ".credit .credit-capsule" ? c : null; }}; }')
+    out = run_js([("creditHtml", "shell_html.js")], "[creditHtml(doc(cap)), creditHtml(doc(null))]", pre)
+    assert out == ['<span class="credit-capsule">x</span>', ""], out
+    st = js_function("start", "shell.js")
+    assert "openSettings: toggleSettings," in st
+    assert "openBubble(rect, function (b)" in js_function("openSettings", "shell.js")
+
+
+@test
+def test_probe_credit_sits_after_the_page_and_keeps_its_clicks():
+    pre = """
+var creditHost = {parentNode: null}, prevented = 0, handled = 0, mode = "comment";
+var de = {appendChild: function (n) { n.parentNode = de; this.n = (this.n || 0) + 1; }};
+var document = {documentElement: de};
+function commentClick() { handled++; } function editClick() { handled++; } function followOut() {}
+function ev(t) { return {type: "click", target: t, stopImmediatePropagation: function () {},
+                         preventDefault: function () { prevented++; }}; }
+"""
+    out = run_js(["placeCredit", "onClick"],
+                 "(placeCredit(), placeCredit(), onClick(ev(creditHost)), "
+                 "[de.n, creditHost.parentNode === de, prevented, handled, (onClick(ev({})), prevented)])",
+                 pre, asset="probe.js")
+    assert out == [1, True, 0, 0, 1], out
+    pre = "var host = {}, creditHost = {};"
+    out = run_js(["onlyHost"], "[onlyHost([host, creditHost]), onlyHost([creditHost]), onlyHost([{}])]",
+                 pre, asset="probe.js")
+    assert out == [True, True, False], out
+    js = shell._asset("probe.js")
+    assert "setCredit(m.credit);" in js_function("onMessage", "probe.js")
+    assert "placeCredit();" in js_function("redraw", "probe.js")
+    oc = js_function("onCreditClick", "probe.js")
+    assert 'post("settings", {rect: plainRect(' in oc and 'aria-disabled' in oc
 
 
 @test

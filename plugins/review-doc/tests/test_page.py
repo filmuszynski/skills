@@ -146,7 +146,7 @@ def test_settings_panel_posts_json_and_confirms():
     assert "rememberSettings(res.settings)" in panel
     assert "expireOld(hoursMs(res.settings.stale_hours), LSKEY)" in panel, "never the open page's marks"
     assert 'res.field === "stale_hours"' in panel, "a refused number is shown on its field"
-    assert "did not answer" in fn_body(src, "wireSettings"), "a stopped server says so"
+    assert "did not answer" in fn_body(src, "toggleSettings"), "a stopped server says so"
 
 
 @test
@@ -184,7 +184,8 @@ def test_settings_button_is_disabled_from_file():
 @test
 def test_settings_panel_closes_like_a_bubble():
     src = js()
-    assert "openBubble(btn.getBoundingClientRect()" in fn_body(src, "openSettings")
+    assert "openBubble(rect" in fn_body(src, "openSettings")
+    assert "toggleSettings(btn.getBoundingClientRect())" in fn_body(src, "wireSettings")
     i = src.index("if (bubble && !bubble.contains(ev.target)) closeBubble();")
     assert "#open-settings" in src[i - 400:i], "the button toggles; outside click does not reopen it"
     assert "wireSettings();" in fn_body(src, "start")
@@ -248,7 +249,7 @@ def test_tooltips_can_be_switched_off():
     assert "hideTip()" in apply, "switching off hides a tooltip already showing"
     remember = src.split("function rememberSettings(s) {", 1)[1].split("\n  }", 1)[0]
     assert "show_tips" in remember, "a page without the server uses the last value it heard"
-    panel = src.split("function openSettings(btn, s) {", 1)[1].split("function wireSettings", 1)[0]
+    panel = src.split("function openSettings(rect, s) {", 1)[1].split("function wireSettings", 1)[0]
     assert 'box("Show tooltips", s.show_tips' in panel
     assert "show_tips: tips.checked" in panel
     assert "applyTipsSetting(res.settings)" in panel, "a save takes effect on this page at once"

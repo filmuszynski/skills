@@ -3433,9 +3433,9 @@
     });
   }
 
-  function openSettings(btn, s) {
+  function openSettings(rect, s) {
     var age = pageAgeHours();
-    openBubble(btn.getBoundingClientRect(), function (b) {
+    openBubble(rect, function (b) {
       b.classList.add("settings-panel");
       b.setAttribute("role", "dialog");
       b.setAttribute("aria-label", "Review page settings");
@@ -3543,12 +3543,15 @@
       btn.setAttribute("data-tip", "Settings need the local review server. In Claude Code, run /review-doc:settings");
       return;
     }
-    btn.addEventListener("click", function () {
-      if (bubble && bubble.classList.contains("settings-panel")) { closeBubble(); return; }
-      fetchSettings(3000).then(function (s) {
-        if (!s) { flash("Settings need the review server, and it did not answer", "bad", 4000); return; }
-        openSettings(btn, s);
-      });
+    btn.addEventListener("click", function () { toggleSettings(btn.getBoundingClientRect()); });
+  }
+
+  /* The credit line's Settings part, here or in an HTML page's frame. */
+  function toggleSettings(rect) {
+    if (bubble && bubble.classList.contains("settings-panel")) { closeBubble(); return; }
+    fetchSettings(3000).then(function (s) {
+      if (!s) { flash("Settings need the review server, and it did not answer", "bad", 4000); return; }
+      openSettings(rect, s);
     });
   }
 
@@ -3753,6 +3756,7 @@
       runOffsets: runOffsets,
       scope: scopeNow,
       closeBubble: closeBubble,
+      openSettings: toggleSettings,
       save: save,
       updatePrompt: updatePrompt,
       undo: undo,

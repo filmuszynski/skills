@@ -521,6 +521,7 @@
   var pending = null, pendingSel = null;   /* last committed edit the shell has not named yet */
   var editing = null, startHTML = "", startText = "";
   var host = null, root = null, boxWrap = null;
+  var creditHost = null, creditRoot = null;
 
   function post(type, fields) {
     if (!shellOrigin || window.parent === window) return;
@@ -541,6 +542,7 @@
     }
     if (m.type === "init") {
       setMode(m.mode);
+      setCredit(m.credit);
       post("hello", {path: ENTRY_PATH, title: document.title});
     } else if (m.type === "mode") {
       setMode(m.mode);
@@ -618,6 +620,57 @@
     return root;
   }
 
+  /* The shell's credit line, after the page's own content: the last child of
+     <html>, so it follows <body> whatever the body's layout. Closed shadow,
+     like the layer; nothing in it is page text, so it is never selected,
+     commented on or rewritten. */
+  var CREDIT_CSS =
+    ":host { display: block; }\n" +
+    ".credit { display: flex; justify-content: center; padding: 32px 16px 40px;" +
+    " font: 13px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; color: #6f675c;" +
+    " user-select: none; -webkit-user-select: none; }\n" +
+    ".credit-capsule { display: inline-flex; flex-wrap: wrap; justify-content: center;" +
+    " border: 1px solid #d9d3c8; border-radius: 999px; overflow: hidden; background: #F6F4EF; }\n" +
+    ".credit-seg { padding: .3em 1.1em; font: inherit; color: inherit; background: none; border: 0;" +
+    " text-decoration: none; white-space: nowrap; transition: background-color .15s ease, color .15s ease; }\n" +
+    ".credit-seg + .credit-seg { border-left: 1px solid #d9d3c8; }\n" +
+    ".credit-seg:first-child { color: #b5562a; }\n" +
+    "a.credit-seg:hover, .credit-settings:hover { background: #efeae0; color: #b5562a; }\n" +
+    ".credit-seg:focus-visible { outline: 2px solid #F0844E; outline-offset: -2px; }\n" +
+    ".credit-settings { cursor: pointer; }\n" +
+    ".credit-gear { width: 1.2em; height: 1.2em; margin-right: .35em; vertical-align: -.25em; fill: none;" +
+    " stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; transition: transform .3s ease; }\n" +
+    ".credit-settings:hover .credit-gear { transform: rotate(45deg); }\n" +
+    ".credit-settings[aria-disabled=\"true\"] { opacity: .55; cursor: default; background: none; color: inherit; }\n" +
+    "@media (prefers-reduced-motion: reduce) { .credit-seg, .credit-gear { transition: none; } }\n";
+
+  function setCredit(html) {
+    if (typeof html !== "string" || !html || !document.documentElement) return;
+    if (!creditHost) {
+      creditHost = document.createElement("review-doc-credit");
+      creditHost.style.setProperty("all", "initial", "important");
+      creditHost.style.setProperty("display", "block", "important");
+      creditRoot = creditHost.attachShadow({mode: "closed"});
+      creditRoot.addEventListener("click", onCreditClick);
+    }
+    creditRoot.innerHTML = "<style>" + CREDIT_CSS + "</style><div class=\"credit\">" + html + "</div>";
+    placeCredit();
+  }
+
+  /* A page that rewrites <html> may drop it; every redraw puts it back. */
+  function placeCredit() {
+    var de = document.documentElement;
+    if (creditHost && de && creditHost.parentNode !== de) de.appendChild(creditHost);
+  }
+
+  /* Its links open as links do (onClick lets every click on it through); its
+     Settings part opens the shell's panel next to it. */
+  function onCreditClick(ev) {
+    var b = ev.target && ev.target.closest ? ev.target.closest("#open-settings") : null;
+    if (!b || b.getAttribute("aria-disabled") === "true") return;
+    post("settings", {rect: plainRect(b.getBoundingClientRect())});
+  }
+
   function nonEmpty(r) {
     return r.width > 0 && r.height > 0;
   }
@@ -677,6 +730,7 @@
     redrawTimer = null;
     if (!drawnOnce) return {};
     layer();
+    placeCredit();
     var op = mode === "use" ? ".35" : "1";
     if (host.style.getPropertyValue("opacity") !== op) host.style.setProperty("opacity", op, "important");
     while (boxWrap.lastChild) boxWrap.removeChild(boxWrap.lastChild);
@@ -759,7 +813,7 @@
   }
 
   function onlyHost(list) {
-    for (var i = 0; i < list.length; i++) if (list[i] !== host) return false;
+    for (var i = 0; i < list.length; i++) if (list[i] !== host && list[i] !== creditHost) return false;
     return true;
   }
 
@@ -1291,6 +1345,7 @@
      and Edit text swallow them before any page listener (decision 14), except
      one Alt+click in Comment mode. */
   function onClick(ev) {
+    if (creditHost && ev.target === creditHost) return;   /* the credit line is ours */
     if (mode === "use") {
       if (ev.type === "click") followOut(ev);
       return;
