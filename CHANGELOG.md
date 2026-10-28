@@ -6,6 +6,19 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-10-28
+
+### Security
+- HTML review: the review page and the reviewed page talk over a private channel that
+  the page's own scripts cannot listen to or post on. Window messages from the frame are
+  no longer accepted.
+- HTML review: a rewrite counts only when the reviewer typed or pasted it. A change a
+  page script makes to the text is put back, and the answer shows only plain selectors
+  the review itself built.
+- HTML review: the answer and the `review-html` skill mark quoted page text, old and new
+  text and selectors as page content to place, never as instructions. An unrelated or
+  unmatched rewrite is shown to the user before it is applied.
+
 ## [1.2.2] - 2026-10-25
 
 ### Changed

@@ -505,7 +505,19 @@
   var ORIGINS = ["http://127.0.0.1:" + SHELL_PORT, "http://localhost:" + SHELL_PORT,
                  "http://[::1]:" + SHELL_PORT];
 
-  var shellOrigin = null;   /* fixed by the first accepted init */
+  /* The private line to the shell: a MessagePort the shell hands over with init.
+     The probe runs before any page script, so it takes the methods it needs now;
+     a page that patches MessagePort, MessageEvent or Event later can neither see
+     the port nor post on it, and the page's own listeners never get the init. */
+  var apply = Reflect.apply, keysOf = Object.keys;
+  var portPost = MessagePort.prototype.postMessage;
+  var stopNow = Event.prototype.stopImmediatePropagation;
+  function getterOf(proto, name) { return Object.getOwnPropertyDescriptor(proto, name).get; }
+  var sourceOf = getterOf(MessageEvent.prototype, "source"), originOf = getterOf(MessageEvent.prototype, "origin");
+  var dataOf = getterOf(MessageEvent.prototype, "data"), portsOf = getterOf(MessageEvent.prototype, "ports");
+  var setOnMessage = Object.getOwnPropertyDescriptor(MessagePort.prototype, "onmessage").set;
+  var port = null;
+
   var mode = "use";
   var stops = [];           /* [{key, kind, id, n, first, pieces, caret}] in document order */
   var boxes = [];           /* what the last redraw drew, for hit-testing */
@@ -520,26 +532,43 @@
   var touched = [];         /* elements whose original markup we saved (el.__rdOrig) */
   var pending = null, pendingSel = null;   /* last committed edit the shell has not named yet */
   var editing = null, startHTML = "", startText = "";
+  var typedHTML = null;     /* the open element's markup after the last trusted input */
   var host = null, root = null, boxWrap = null;
   var creditHost = null, creditRoot = null;
 
+  /* Only on the private line. The message has no prototype, so a setter a page
+     put on Object.prototype never sees a field. */
   function post(type, fields) {
-    if (!shellOrigin || window.parent === window) return;
-    var m = {rd: 1, type: type}, k;
-    for (k in (fields || {})) m[k] = fields[k];
-    window.parent.postMessage(m, shellOrigin);
+    if (!port) return;
+    var m = {__proto__: null}, ks = keysOf(fields || {}), i;   /* a literal: no lookup a page could patch */
+    m.rd = 1;
+    m.type = type;
+    for (i = 0; i < ks.length; i++) m[ks[i]] = fields[ks[i]];
+    apply(portPost, port, [m]);
   }
 
+  /* The window hears one thing: the shell's init, which carries the port. It
+     must be a real message (not one a page script dispatched) from the parent
+     on the shell's origin. One port per document; a second init is dropped. */
   function onMessage(ev) {
-    if (ev.source !== window.parent) return;
-    if (ORIGINS.indexOf(ev.origin) === -1) return;
-    if (shellOrigin && ev.origin !== shellOrigin) return;
-    var m = ev.data;
+    if (!ev.isTrusted || apply(sourceOf, ev, []) !== window.parent) return;
+    if (ORIGINS.indexOf(apply(originOf, ev, [])) === -1) return;
+    var m = apply(dataOf, ev, []);
+    if (!m || typeof m !== "object" || m.rd !== 1 || m.type !== "init") return;
+    apply(stopNow, ev, []);
+    var ps = apply(portsOf, ev, []);
+    if (port || !ps || !ps[0]) return;
+    port = ps[0];
+    apply(setOnMessage, port, [onPortMessage]);
+    fromShell(m);
+  }
+
+  function onPortMessage(ev) {
+    fromShell(apply(dataOf, ev, []));
+  }
+
+  function fromShell(m) {
     if (!m || typeof m !== "object" || m.rd !== 1) return;
-    if (!shellOrigin) {
-      if (m.type !== "init") return;
-      shellOrigin = ev.origin;
-    }
     if (m.type === "init") {
       setMode(m.mode);
       setCredit(m.credit);
@@ -1212,6 +1241,7 @@
     startText = flatText(el).text;
     el.setAttribute("contenteditable", "true");
     el.setAttribute("spellcheck", "false");
+    typedHTML = null;
     el.focus();
     var s = window.getSelection();
     /* A drag that ended on this element picked its words: keep them selected. */
@@ -1249,6 +1279,17 @@
     if (neu === startText || (!el.__rdEdit && neu === alt)) {
       drawAgain();                              /* nothing to post in this round */
       return;
+    }
+    if (typedHTML === null) {
+      /* Changed, but not by the reviewer's input: a page script did it. */
+      if (el.innerHTML !== startHTML) el.innerHTML = startHTML;
+      drawAgain();
+      return;
+    }
+    if (el.innerHTML !== typedHTML) {
+      /* Changed again after the last typed input: only the typed state counts. */
+      el.innerHTML = typedHTML;
+      neu = flatText(el).text;
     }
     var sel = selectorFor(el);
     if (!el.__rdEdit) {
@@ -1308,6 +1349,7 @@
       ev.preventDefault();
       var text = ev.dataTransfer ? ev.dataTransfer.getData("text/plain") : "";
       if (text) document.execCommand("insertText", false, text.replace(/\s+/g, " "));
+      if (ev.isTrusted) typedHTML = editing.innerHTML;   /* the reviewer's own paste */
       return;
     }
     if (t.indexOf("format") === 0 || t === "insertParagraph" || t === "insertLineBreak" ||
@@ -1316,8 +1358,12 @@
     }
   }
 
+  /* A trusted input event follows every change the reviewer's own input makes;
+     its markup is what the edit is. A script's synthetic event does not count. */
   function onInput(ev) {
-    if (editing && inside(ev.target, editing)) ev.stopImmediatePropagation();
+    if (!editing || !inside(ev.target, editing)) return;
+    ev.stopImmediatePropagation();
+    if (ev.isTrusted) typedHTML = editing.innerHTML;
   }
 
   function onFocusOut(ev) {
@@ -1449,7 +1495,7 @@
 
   /* Registered when the probe loads, before any page script, on window in the
      capture phase, so ours run first and can stop the page's own listeners. */
-  window.addEventListener("message", onMessage);
+  window.addEventListener("message", onMessage, true);
   window.addEventListener("click", onClick, true);
   window.addEventListener("dblclick", onClick, true);
   window.addEventListener("auxclick", onClick, true);
