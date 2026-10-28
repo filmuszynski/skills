@@ -24,6 +24,21 @@ any code; plans stay in the author's private workspace (ADR 0008).
 | 4 ✅ | The answer, the four-step lookup, the lost-items strip, rounds, reload | Tests green; browser check |
 | 5 | Skills (`/vet` routes HTML, `review-html`), local addresses, charsets, the setting, docs, release (ADR 0020) | v1.2.0 released; one real round |
 
+## Phone review over Tailscale (version not yet set)
+
+Review pages opened in the Claude app on the phone, with the session steered through
+Remote Control. Off by default (a `phone` setting); tailnet only, never Funnel.
+
+| Phase | What | Done when |
+|---|---|---|
+| 0 ✅ | Spike (done 28.10.2026, see `docs/spikes/2026-10-28-phone-phase-0-findings.md`) | Findings written |
+| 1 | `phone` setting (off by default) and recording the owner's login; the server accepts the tailnet Host and `https` Origin only with that `Tailscale-User-Login`; `tailscale serve` started with the server and stopped with it, on a free HTTPS port, never over an existing config | Tests green; phone round on a Markdown page |
+| 2 | Phone link in every handover: renderer JSON field, `/vet` handover text, plan hook's `additionalContext`; the server records the newest handover and open pages follow it, so after one tap per session new pages open on the phone by themselves | Tests green; plan and doc pages hand over three lines and follow on the phone |
+| 3 | Phone layout: touch selection opens the comment bubble; the on-screen keyboard no longer closes bubbles and Settings; bubbles and Settings centred on narrow screens; no overscroll of the bottom panel | Tests green; phone round with comments and a Settings save |
+| 4 | HTML review over the tailnet: frame on its own served HTTPS port, one tailnet review at a time, review named in the frame URL, `Clear-Site-Data` on every switch; new ADR next to 0016 | Tests green; phone round on an HTML page, storage checks repeated on the phone |
+| 5 | ADRs (tailnet Host, amending 0012), README, CHANGELOG, screenshots, release, the author's install; macOS and iOS checks | Released; checked on a Mac and an iPhone |
+| 6 | Setup instructions for a second user (author's private workspace) | Approved by the author |
+
 ## Later
 
 | Release | What |
