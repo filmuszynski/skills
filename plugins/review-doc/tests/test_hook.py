@@ -89,6 +89,9 @@ def test_context_names_both_lines_buttons_and_expiry():
     assert len(lines) == 4 and "—" not in text
     one = render_plan.context_for(dict(res, sections=1, opened=False), 96)
     assert "It covers 1 section." in one and "opened" not in one.split("\n")[0]
+    app = render_plan.context_for(dict(res, opened="claude-desktop"), 96).split("\n")
+    assert "built-in browser pane" in app[0] and "BOTH" in app[0], app[0]
+    assert app[1] == res["url"] and app[2] == res["path"], app
 
 
 @test

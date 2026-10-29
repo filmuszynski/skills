@@ -27,6 +27,8 @@ PORTS = range(27777, 27788)
 # Deciding the extension offer reads the VS Code extensions folder; never the real one.
 os.environ["VSCODE_EXTENSIONS"] = os.path.join(TMP, "no-extensions")
 os.makedirs(os.environ["VSCODE_EXTENSIONS"], exist_ok=True)
+# A run started from the Claude desktop app would otherwise take the app's opening path.
+os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
 
 RESULTS = []
 

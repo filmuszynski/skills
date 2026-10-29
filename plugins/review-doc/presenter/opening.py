@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Open a freshly rendered page: in VS Code's built-in browser inside a VS Code
 terminal with the opener extension installed, in the system browser everywhere else.
+In the Claude desktop app nothing opens here: Claude opens the page in the app's own
+browser pane, which no process outside the app can reach.
 Never fails the render, and never keeps the caller's output open: the link is printed
 either way."""
 import glob
@@ -68,7 +70,14 @@ def system_open(url):
     return True
 
 
+def in_claude_desktop():
+    """The Claude desktop app sets this for every Claude Code session it runs."""
+    return os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "claude-desktop"
+
+
 def open_page(url):
+    if in_claude_desktop() and url.startswith("http"):
+        return "claude-desktop"
     if open_in_vscode(url):
         return "vscode"
     try:

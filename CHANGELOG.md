@@ -6,6 +6,13 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-10-29
+
+### Changed
+- In the Claude desktop app, a new page no longer opens in the system browser. Claude
+  opens it in the app's built-in browser pane instead, for documents, HTML pages and
+  plans alike.
+
 ## [1.2.3] - 2026-10-28
 
 ### Security

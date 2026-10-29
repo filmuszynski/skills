@@ -55,6 +55,9 @@ def context_for(result, stale_hours, python=None):
         ])
     opened ={"vscode": " and opened in VS Code's built-in browser",
               "browser": " and opened in the browser"}.get(result.get("opened"), "")
+    if result.get("opened") == "claude-desktop":
+        opened = (" for the Claude desktop app. Open the url in the app's built-in browser "
+                  "pane (the preview tool with a url) before you answer")
     n = int(result.get("sections") or 0)
     lines = [
         "A review page for this plan was generated automatically%s. Give the user BOTH of "

@@ -71,6 +71,10 @@ and paste the result back to you. Do not describe the page further; they can see
 
 - `"opened"` is `"vscode"` or `"browser"` when the page already opened itself. Still
   hand over both lines: they are how the page is reopened.
+- `"opened": "claude-desktop"` means the session runs in the Claude desktop app, where
+  the renderer opens nothing itself. Open `url` in the app's built-in browser pane
+  (its preview tool, given the url), never in the system browser, then hand over both
+  lines as usual. Do the same with a plan link a hook handed over in the desktop app.
 - `"server": false` means the local server did not start, and `url` is a `file://`
   link. Say so in one line, using `serverNote` for the reason. Comments and the answer
   still work from the file; the ⚙ Settings button in the page does not.
