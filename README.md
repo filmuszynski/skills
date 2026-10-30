@@ -161,6 +161,9 @@ note, and paste the answer back.
   review the file again to make a new one.
 - **Pages open in VS Code although you use another editor.** Cursor and some other
   editors set `TERM_PROGRAM=vscode`. Turn `auto-open` off, or decline the extension.
+- **In the Claude desktop app, no browser window opens.** That is on purpose: Claude
+  opens the page in the app's own browser pane instead. Both lines it hands over still
+  open the page anywhere else.
 - **An HTML page is refused because of its folder.** HTML review shares the page's
   whole folder with the frame that shows it, so a page directly in your home folder or
   at the top of a drive is not opened. Move it into a folder of its own.

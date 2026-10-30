@@ -114,6 +114,21 @@ def test_falls_back_to_system_browser():
 
 
 @test
+def test_claude_desktop_leaves_http_pages_to_claude():
+    calls, fn = recorder(True)
+    url = "http://127.0.0.1:7777/review/x.html"
+    vscode_calls, vscode = recorder(False)
+    with env(CLAUDE_CODE_ENTRYPOINT="claude-desktop"), \
+            patch(opening, "open_in_vscode", vscode), patch(opening, "system_open", fn):
+        assert opening.open_page(url) == "claude-desktop"
+        assert calls == [] and vscode_calls == [], "nothing opens outside the app"
+        assert opening.open_page("file:///tmp/x.html") == "browser", "the pane needs a server"
+    with env(CLAUDE_CODE_ENTRYPOINT="cli"), \
+            patch(opening, "open_in_vscode", lambda url: False), patch(opening, "system_open", fn):
+        assert opening.open_page(url) == "browser"
+
+
+@test
 def test_browser_tool_per_platform():
     assert opening.browser_tool("darwin") == "open"
     assert opening.browser_tool("linux") == "xdg-open"
